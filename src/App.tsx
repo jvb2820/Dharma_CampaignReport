@@ -1442,8 +1442,100 @@ function App() {
       <section className="dashboard-header">
         <div className="header-content">
           <div className="brand-lockup">
-            <img src="/logo1.png" alt="" />
             <h1>Dharma Campaign Report</h1>
+          </div>
+          <div className="hero-line-graph" aria-hidden="true">
+            <svg viewBox="0 0 560 132" role="img">
+              <defs>
+                <linearGradient id="heroLineGradientA" x1="0" x2="1" y1="0" y2="0">
+                  <stop offset="0%" stopColor="#bcd088" />
+                  <stop offset="58%" stopColor="#f3cd65" />
+                  <stop offset="100%" stopColor="#1c543c" />
+                </linearGradient>
+                <linearGradient id="heroLineGradientB" x1="0" x2="1" y1="0" y2="0">
+                  <stop offset="0%" stopColor="#1c543c" />
+                  <stop offset="54%" stopColor="#91a95f" />
+                  <stop offset="100%" stopColor="#d7a935" />
+                </linearGradient>
+                <linearGradient id="heroChartPanel" x1="0" x2="1" y1="0" y2="1">
+                  <stop offset="0%" stopColor="#163a2d" />
+                  <stop offset="58%" stopColor="#1f3e32" />
+                  <stop offset="100%" stopColor="#6f531d" />
+                </linearGradient>
+              </defs>
+              <rect className="hero-chart-panel" x="1" y="1" width="558" height="130" rx="10" />
+              <g className="hero-chart-grid">
+                <path d="M28 24 H532" />
+                <path d="M28 54 H532" />
+                <path d="M28 84 H532" />
+                <path d="M28 114 H532" />
+                <path d="M64 16 V118" />
+                <path d="M132 16 V118" />
+                <path d="M200 16 V118" />
+                <path d="M268 16 V118" />
+                <path d="M336 16 V118" />
+                <path d="M404 16 V118" />
+                <path d="M472 16 V118" />
+              </g>
+              <g className="hero-candles">
+                <path d="M48 42 V78" /><rect x="43" y="54" width="10" height="16" rx="2" />
+                <path d="M78 35 V91" /><rect x="73" y="49" width="10" height="29" rx="2" />
+                <path d="M108 26 V62" /><rect x="103" y="34" width="10" height="18" rx="2" />
+                <path d="M138 50 V101" /><rect x="133" y="63" width="10" height="24" rx="2" />
+                <path d="M168 31 V73" /><rect x="163" y="42" width="10" height="19" rx="2" />
+                <path d="M198 38 V92" /><rect x="193" y="55" width="10" height="22" rx="2" />
+                <path d="M228 20 V61" /><rect x="223" y="29" width="10" height="18" rx="2" />
+                <path d="M258 46 V105" /><rect x="253" y="64" width="10" height="27" rx="2" />
+                <path d="M288 27 V72" /><rect x="283" y="39" width="10" height="20" rx="2" />
+                <path d="M318 52 V99" /><rect x="313" y="66" width="10" height="19" rx="2" />
+                <path d="M348 35 V82" /><rect x="343" y="47" width="10" height="21" rx="2" />
+                <path d="M378 25 V66" /><rect x="373" y="34" width="10" height="18" rx="2" />
+                <path d="M408 49 V106" /><rect x="403" y="62" width="10" height="28" rx="2" />
+                <path d="M438 32 V76" /><rect x="433" y="44" width="10" height="18" rx="2" />
+                <path d="M468 41 V93" /><rect x="463" y="56" width="10" height="22" rx="2" />
+                <path d="M498 28 V70" /><rect x="493" y="40" width="10" height="17" rx="2" />
+              </g>
+              <path
+                className="hero-line-graph-shadow"
+                d="M28 86 C64 64 91 34 124 50 C158 66 184 91 222 78 C264 63 275 26 315 36 C358 45 372 72 410 62 C450 51 464 27 500 38 C520 44 528 58 536 51"
+              />
+              <path
+                className="hero-line-graph-shadow secondary"
+                d="M28 42 C64 47 86 76 124 69 C165 62 184 33 224 43 C264 52 277 86 316 76 C359 65 371 37 410 47 C449 57 462 86 501 73 C519 67 529 48 536 52"
+              />
+              <path
+                className="hero-line-graph-track line-a"
+                d="M28 86 C64 64 91 34 124 50 C158 66 184 91 222 78 C264 63 275 26 315 36 C358 45 372 72 410 62 C450 51 464 27 500 38 C520 44 528 58 536 51"
+              />
+              <path
+                className="hero-line-graph-track line-b"
+                d="M28 42 C64 47 86 76 124 69 C165 62 184 33 224 43 C264 52 277 86 316 76 C359 65 371 37 410 47 C449 57 462 86 501 73 C519 67 529 48 536 52"
+              />
+              <g className="hero-line-graph-points line-a">
+                <circle cx="124" cy="50" r="4" />
+                <text x="124" y="35">48</text>
+                <circle cx="222" cy="78" r="4" />
+                <text x="222" y="98">32</text>
+                <circle cx="315" cy="36" r="4" />
+                <text x="315" y="21">74</text>
+                <circle cx="410" cy="62" r="4" />
+                <text x="410" y="82">51</text>
+                <circle cx="500" cy="38" r="4" />
+                <text x="500" y="23">89</text>
+              </g>
+              <g className="hero-line-graph-points line-b">
+                <circle cx="124" cy="69" r="4" />
+                <text x="124" y="89">61</text>
+                <circle cx="224" cy="43" r="4" />
+                <text x="224" y="28">83</text>
+                <circle cx="316" cy="76" r="4" />
+                <text x="316" y="96">44</text>
+                <circle cx="410" cy="47" r="4" />
+                <text x="410" y="32">68</text>
+                <circle cx="501" cy="73" r="4" />
+                <text x="501" y="93">57</text>
+              </g>
+            </svg>
           </div>
           <div className="header-actions">
             <label className="header-date-control">
@@ -1461,6 +1553,14 @@ function App() {
               disabled={fetchProgress.isRunning}
             >
               {fetchProgress.isRunning ? 'Fetching...' : 'Fetch Data'}
+            </button>
+            <button
+              className="respond-login-button"
+              type="button"
+              onClick={openRespondIoLogin}
+              disabled={isRespondIoLoginOpening}
+            >
+              {isRespondIoLoginOpening ? 'Opening...' : 'Login from respond'}
             </button>
             <span className="live-chip">Daily spend intelligence</span>
           </div>
