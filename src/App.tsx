@@ -144,6 +144,7 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
 })
 
 const numberFormatter = new Intl.NumberFormat('en-US')
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
 const totalFetchSteps = 3
@@ -170,6 +171,10 @@ function getSupabaseRestUrl(path: string, params?: URLSearchParams) {
   }
 
   return url
+}
+
+function getApiUrl(path: string) {
+  return `${apiBaseUrl}${path}`
 }
 
 async function supabaseRequest<T>(
@@ -1157,7 +1162,7 @@ function App() {
 
       params.set('timezone', 'America/New_York')
 
-      const response = await fetch(`/api/smg-campaign-budgets?${params.toString()}`)
+      const response = await fetch(getApiUrl(`/api/smg-campaign-budgets?${params.toString()}`))
       const payload = await readJsonResponse<BudgetResponse>(
         response,
         'Facebook data fetch returned an empty response.',
@@ -1354,7 +1359,7 @@ function App() {
 
       params.set('platform', platform)
 
-      const response = await fetch(`/api/respondio-report-metrics?${params.toString()}`)
+      const response = await fetch(getApiUrl(`/api/respondio-report-metrics?${params.toString()}`))
       const payload = await readJsonResponse<RespondIoReportResponse>(
         response,
         'respond.io report fetch returned an empty response.',
@@ -1415,7 +1420,7 @@ function App() {
     setRespondIoReportError(null)
 
     try {
-      const response = await fetch('/api/respondio-login')
+      const response = await fetch(getApiUrl('/api/respondio-login'))
       const payload = await readJsonResponse<{ message?: string }>(
         response,
         'respond.io login returned an empty response.',
