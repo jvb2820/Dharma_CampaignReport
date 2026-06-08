@@ -206,13 +206,13 @@ function respondIoReportMetricsApi(apiToken: string, analyticsToken: string): Pl
           const meta = await fetchRespondReportGroup({
             token: analyticsToken,
             reportDate,
-            openedSource: 'ctc_ads',
+            adPlatform: 'meta',
+            includedChannelIds: getIncludedMetaChannelIds(channels.items ?? [], excludedTiktokChannel?.id),
           })
           const tiktok = await fetchRespondReportGroup({
             token: analyticsToken,
             reportDate,
-            openedSource: 'tiktok_ctc_ads',
-            excludedChannelId: excludedTiktokChannel?.id,
+            adPlatform: 'tiktok',
           })
 
           sendJson(response, 200, {
@@ -462,19 +462,19 @@ async function respondIoAnalyticsPost<T>(path: string, body: unknown, token: str
 async function fetchRespondReportGroup({
   token,
   reportDate,
-  openedSource,
-  excludedChannelId,
+  adPlatform,
+  includedChannelIds,
 }: {
   token: string
   reportDate: string
-  openedSource: string
-  excludedChannelId?: number
+  adPlatform: string
+  includedChannelIds?: number[]
 }) {
   const baseFilters = {
     date: getNewYorkDateRange(reportDate),
-    conversationOpenedSource: [openedSource],
-    ...(excludedChannelId
-      ? { conversationOpenedChannel: { exclude: [excludedChannelId] } }
+    adPlatform: [adPlatform],
+    ...(includedChannelIds?.length
+      ? { conversationOpenedChannels: includedChannelIds }
       : {}),
   }
   const overview = await respondIoAnalyticsPost<RespondIoAnalyticsResponse>(
@@ -494,17 +494,58 @@ async function fetchRespondReportGroup({
   }
 }
 
+function getIncludedMetaChannelIds(channels: RespondIoChannel[], excludedChannelId?: number) {
+  return channels
+    .map((channel) => channel.id)
+    .filter((channelId) => channelId !== excludedChannelId)
+}
+
 function readCountByPossibleKeys(payload: RespondIoAnalyticsResponse, keys: string[]) {
   for (const key of keys) {
-    const value = payload[key] ?? payload.values?.[key]
+    const count = readCountAtKey(payload, key)
 
-    if (typeof value === 'object' && value && 'count' in value) {
-      const count = (value as { count?: unknown }).count
+    if (count !== null) {
+      return count
+    }
+  }
+
+  const values = Array.isArray(payload.values) ? payload.values : Array.isArray(payload) ? payload : []
+
+  for (const row of values) {
+    if (!row || typeof row !== 'object') {
+      continue
+    }
+
+    const item = row as Record<string, unknown>
+    const label = String(
+      item.key ?? item.label ?? item.name ?? item.type ?? item.contactType ?? '',
+    ).toLowerCase()
+
+    if (keys.some((key) => label === key.toLowerCase())) {
+      const count = item.count ?? item.value ?? item.total
       return typeof count === 'number' ? count : 0
     }
   }
 
   return 0
+}
+
+function readCountAtKey(payload: RespondIoAnalyticsResponse, key: string) {
+  const value = payload[key] ?? payload.values?.[key]
+
+  if (typeof value === 'number') {
+    return value
+  }
+
+  if (typeof value === 'object' && value) {
+    const count = (value as { count?: unknown; value?: unknown; total?: unknown }).count ??
+      (value as { count?: unknown; value?: unknown; total?: unknown }).value ??
+      (value as { count?: unknown; value?: unknown; total?: unknown }).total
+
+    return typeof count === 'number' ? count : 0
+  }
+
+  return null
 }
 
 function getNewYorkDateRange(reportDate: string) {

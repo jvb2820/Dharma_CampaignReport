@@ -6,6 +6,10 @@ const statePath = resolve('.auth/respondio-state.json')
 const profilePath = resolve('.auth/respondio-profile')
 const reportDate = readArg('--date') ?? getTodayISO()
 const platform = readArg('--platform') ?? 'all'
+const defaultMetaChannelIds = [
+  494850, 493621, 439286, 433241, 433238, 426799, 396210, 396209, 376692, 333332, 333331,
+  333330, 333328, 333321, 330509, 330347,
+]
 
 if (!existsSync(statePath) && !existsSync(profilePath)) {
   fail('Missing saved respond.io session. Use the dashboard login prompt first.')
@@ -53,14 +57,23 @@ try {
   const channels = normalizeItems(channelResponse)
   const excludedTiktokChannel = channels.find((channel) => channel.name === 'PT - 2034') ?? null
 
-  const rows = await fetchConversationLogRows(page, reportDate)
   const shouldFetchMeta = platform === 'all' || platform === 'meta'
   const shouldFetchTiktok = platform === 'all' || platform === 'tiktok'
   const excludedChannelId = excludedTiktokChannel?.id ?? 333279
+  const includedMetaChannelIds = getIncludedMetaChannelIds(channels, excludedChannelId)
   const meta = shouldFetchMeta
-    ? summarizeRows(rows, { adPlatform: 'meta', excludedChannelId })
+    ? await fetchConversationOpenedMetrics(page, {
+        reportDate,
+        adPlatform: 'meta',
+        includedChannelIds: includedMetaChannelIds,
+      })
     : null
-  const tiktok = shouldFetchTiktok ? summarizeRows(rows, { adPlatform: 'tiktok' }) : null
+  const tiktok = shouldFetchTiktok
+    ? await fetchConversationOpenedMetrics(page, {
+        reportDate,
+        adPlatform: 'tiktok',
+      })
+    : null
 
   console.log(
     JSON.stringify({
@@ -75,8 +88,7 @@ try {
       },
       debug: {
         capturedAnalyticsRequests: capturedRequests.length,
-        source: 'conversation/log',
-        rows: rows.length,
+        source: 'analytics/conversation',
         platform,
         metaExcludedChannelId: excludedChannelId,
       },
@@ -94,50 +106,41 @@ async function createStorageStateContext() {
   return browser.newContext({ storageState: statePath })
 }
 
-async function fetchConversationLogRows(page, reportDate) {
-  const date = getNewYorkDateRange(reportDate)
-  const itemsPerPage = 100
-  const firstPage = await fetchConversationLogPage(page, date, 1, itemsPerPage)
-  const rows = [...(firstPage.data ?? [])]
-  const pages = Math.ceil((firstPage.totalCount ?? rows.length) / itemsPerPage)
-
-  for (let pageNumber = 2; pageNumber <= pages; pageNumber += 1) {
-    const pageData = await fetchConversationLogPage(page, date, pageNumber, itemsPerPage)
-    rows.push(...(pageData.data ?? []))
+async function fetchConversationOpenedMetrics(
+  page,
+  { reportDate, adPlatform, includedChannelIds = [] },
+) {
+  const baseFilters = {
+    date: getNewYorkDateRange(reportDate),
+    adPlatform: [adPlatform],
+    ...(includedChannelIds.length
+      ? { conversationOpenedChannels: includedChannelIds }
+      : {}),
   }
-
-  return rows
-}
-
-async function fetchConversationLogPage(page, date, pageNumber, itemsPerPage) {
-  const payload = await appFetch(page, '/analytics/conversation/log', {
+  const overview = await appFetch(page, '/analytics/conversation', {
     method: 'POST',
-    body: {
-      date,
-      pagination: {
-        page: pageNumber,
-        itemsPerPage,
-        sortBy: ['closedAt'],
-        sortDesc: [true],
-      },
-    },
+    body: baseFilters,
+  })
+  const openedByContactType = await appFetch(page, '/analytics/conversation/open-group', {
+    method: 'POST',
+    body: { ...baseFilters, groupBy: 'contactType' },
   })
 
-  return unwrapAnalyticsPayload(payload)
+  return {
+    totalCount: readOpenedCount(overview),
+    newCount: readCountByPossibleKeys(openedByContactType, [
+      'new',
+      'New',
+      'New Contact',
+      'new_contact',
+    ]),
+  }
 }
 
-function summarizeRows(rows, { adPlatform, excludedChannelId = null }) {
-  const matchingRows = rows.filter(
-    (row) =>
-      row.openedByType === 'ctc_ads' &&
-      row.adPlatform === adPlatform &&
-      row.conversationOpenedChannelId !== excludedChannelId,
-  )
+function getIncludedMetaChannelIds(channels, excludedChannelId) {
+  const channelIds = channels.length > 0 ? channels.map((channel) => channel.id) : defaultMetaChannelIds
 
-  return {
-    totalCount: matchingRows.length,
-    newCount: matchingRows.filter((row) => row.isNewContact).length,
-  }
+  return channelIds.filter((channelId) => channelId !== excludedChannelId)
 }
 
 async function appFetch(page, path, options = {}) {
@@ -217,6 +220,55 @@ async function firstSuccessfulAppFetch(page, paths) {
 
 function unwrapAnalyticsPayload(payload) {
   return payload?.data ?? payload
+}
+
+function readOpenedCount(payload) {
+  const data = unwrapAnalyticsPayload(payload)
+  const count = data?.opened?.count ?? data?.overview?.opened?.count
+
+  return typeof count === 'number' ? count : 0
+}
+
+function readCountByPossibleKeys(payload, keys) {
+  const data = unwrapAnalyticsPayload(payload)
+
+  for (const key of keys) {
+    const count = readCountAtKey(data, key)
+
+    if (count !== null) {
+      return count
+    }
+  }
+
+  const values = Array.isArray(data?.values) ? data.values : Array.isArray(data) ? data : []
+
+  for (const row of values) {
+    const label = String(
+      row?.key ?? row?.label ?? row?.name ?? row?.type ?? row?.contactType ?? '',
+    ).toLowerCase()
+
+    if (keys.some((key) => label === key.toLowerCase())) {
+      const count = row?.count ?? row?.value ?? row?.total
+      return typeof count === 'number' ? count : 0
+    }
+  }
+
+  return 0
+}
+
+function readCountAtKey(data, key) {
+  const value = data?.[key] ?? data?.values?.[key]
+
+  if (typeof value === 'number') {
+    return value
+  }
+
+  if (typeof value === 'object' && value) {
+    const count = value.count ?? value.value ?? value.total
+    return typeof count === 'number' ? count : 0
+  }
+
+  return null
 }
 
 function getNewYorkDateRange(date) {
