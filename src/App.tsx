@@ -670,6 +670,7 @@ function CprLineChart({
     { key: 'tiktokCpr', label: 'SP TikTok', color: '#e6a740' },
     { key: 'respondCpr', label: 'SP Respond Average', color: '#183c2e' },
   ] as const
+  const valueLabelOffsets = [-10, 13, -20]
   const maxValue = Math.max(
     1,
     ...points.flatMap((point) => series.map((item) => point[item.key] ?? 0)),
@@ -680,9 +681,15 @@ function CprLineChart({
     <article className="report-chart-card">
       <div className="chart-summary compact">
         <strong>Spend Per Lead - {selectedPoint ? getMonthDayLabel(selectedPoint.reportDate) : 'No reports'}</strong>
-        <span>Meta {formatChartMoney(selectedPoint?.metaCpr ?? null)}</span>
-        <span>TikTok {formatChartMoney(selectedPoint?.tiktokCpr ?? null)}</span>
-        <span>Respond {formatChartMoney(selectedPoint?.respondCpr ?? null)}</span>
+        <span style={{ '--summary-color': series[0].color } as CSSProperties}>
+          Meta {formatChartMoney(selectedPoint?.metaCpr ?? null)}
+        </span>
+        <span style={{ '--summary-color': series[1].color } as CSSProperties}>
+          TikTok {formatChartMoney(selectedPoint?.tiktokCpr ?? null)}
+        </span>
+        <span style={{ '--summary-color': series[2].color } as CSSProperties}>
+          Respond {formatChartMoney(selectedPoint?.respondCpr ?? null)}
+        </span>
       </div>
       <div className="chart-legend" aria-hidden="true">
         {series.map((item) => (
@@ -713,7 +720,7 @@ function CprLineChart({
           </text>
         ) : (
           <>
-            {series.map((item) => {
+            {series.map((item, seriesIndex) => {
               const paddedLength = Math.max(7, points.length)
               const linePoints = points
                 .map((point, pointIndex) => {
@@ -727,9 +734,13 @@ function CprLineChart({
                     x: getPointX(pointIndex, paddedLength, chartLeft + 10, chartAreaWidth),
                     y: getY(value),
                     value,
+                    pointIndex,
                   }
                 })
-                .filter((point): point is { x: number; y: number; value: number } => point !== null)
+                .filter(
+                  (point): point is { x: number; y: number; value: number; pointIndex: number } =>
+                    point !== null,
+                )
 
               return (
                 <g key={item.key}>
@@ -744,6 +755,27 @@ function CprLineChart({
                   {linePoints.map((point) => (
                     <circle key={`${item.key}-${point.x}`} cx={point.x} cy={point.y} r="3" fill={item.color} />
                   ))}
+                  {linePoints.map((point) => {
+                    const labelY = Math.min(
+                      chartTop + chartAreaHeight - 6,
+                      Math.max(9, point.y + valueLabelOffsets[seriesIndex]),
+                    )
+                    const isFirst = point.pointIndex === 0
+                    const isLast = point.pointIndex === points.length - 1
+
+                    return (
+                      <text
+                        key={`${item.key}-${point.x}-label`}
+                        x={point.x}
+                        y={labelY}
+                        textAnchor={isFirst ? 'start' : isLast ? 'end' : 'middle'}
+                        className="point-value-label"
+                        style={{ '--label-color': item.color } as CSSProperties}
+                      >
+                        {formatChartMoney(point.value)}
+                      </text>
+                    )
+                  })}
                 </g>
               )
             })}
