@@ -1860,11 +1860,6 @@ function App() {
               <i style={{ '--progress': '78%' } as CSSProperties} />
             </div>
             <div className="metric">
-              <span>Budget Remaining</span>
-              <strong>{formatMoney(totals.budgetRemaining)}</strong>
-              <i style={{ '--progress': '58%' } as CSSProperties} />
-            </div>
-            <div className="metric">
               <span>Yesterday Spend</span>
               <strong>{formatMoney(totals.spendYesterday)}</strong>
               <i style={{ '--progress': '42%' } as CSSProperties} />
