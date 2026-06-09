@@ -306,6 +306,19 @@ function getMonthDayLabel(dateValue: string) {
     .toUpperCase()
 }
 
+function addDaysToDateValue(dateValue: string, days: number) {
+  const date = new Date(`${dateValue}T00:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+
+  return date.toISOString().slice(0, 10)
+}
+
+function getChartWindowDates(activeReportDate: string) {
+  return Array.from({ length: chartPageSize }, (_, index) =>
+    addDaysToDateValue(activeReportDate, index - chartPageSize + 1),
+  )
+}
+
 function getYesterdayInNewYorkDateInputValue() {
   const newYorkDate = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/New_York',
@@ -441,18 +454,34 @@ function buildHeroChartPoint(report: BudgetResponse, respondIoEntry?: ReportEntr
   const totalsForEntry = respondIoEntry
     ? getReportEntryTotals(respondIoEntry)
     : { totalMetaAndTiktok: 0, newMetaAndTiktok: 0 }
+  const respondMetaLeads = respondIoEntry ? parseEntryNumber(respondIoEntry.totalRespondMeta) : 0
+  const respondTiktokLeads = respondIoEntry ? parseEntryNumber(respondIoEntry.totalRespondTiktok) : 0
   const totalRespondSpend = metaSpend + (report.tiktokTotalSpending ?? 0)
 
   return {
     reportDate: report.reportDate,
     label: getShortDateLabel(report.reportDate),
-    metaLeads,
-    tiktokLeads: report.tiktokLeadsTotal ?? 0,
+    metaLeads: respondMetaLeads,
+    tiktokLeads: respondTiktokLeads,
     totalLeads: totalsForEntry.totalMetaAndTiktok,
     newLeads: totalsForEntry.newMetaAndTiktok,
     metaCpr: getCostPerResultValue(metaSpend, metaLeads),
     tiktokCpr: getCostPerResultValue(report.tiktokTotalSpending, report.tiktokLeadsTotal),
     respondCpr: getCostPerResultValue(totalRespondSpend, totalsForEntry.totalMetaAndTiktok),
+  }
+}
+
+function buildEmptyHeroChartPoint(reportDate: string): HeroChartPoint {
+  return {
+    reportDate,
+    label: getShortDateLabel(reportDate),
+    metaLeads: 0,
+    tiktokLeads: 0,
+    totalLeads: 0,
+    newLeads: 0,
+    metaCpr: null,
+    tiktokCpr: null,
+    respondCpr: null,
   }
 }
 
@@ -1009,7 +1038,6 @@ function App() {
   const [respondIoReportError, setRespondIoReportError] = useState<string | null>(null)
   const [shouldShowRespondIoLogin, setShouldShowRespondIoLogin] = useState(false)
   const [fetchProgress, setFetchProgress] = useState<FetchProgressState>(emptyFetchProgress)
-  const [chartPageIndex, setChartPageIndex] = useState(0)
   useLoadingTick(isLoading)
   useLoadingTick(respondIoReportLoadingPlatform !== null)
   useLoadingTick(fetchProgress.isRunning)
@@ -1073,21 +1101,25 @@ function App() {
     () => metaReports.map((report) => buildHeroChartPoint(report, respondIoEntries[report.reportDate])),
     [metaReports, respondIoEntries],
   )
-  const heroChartPages = useMemo(() => {
-    const pages: HeroChartPoint[][] = []
+  const heroChartPointsByDate = useMemo(
+    () => new Map(heroChartPoints.map((point) => [point.reportDate, point])),
+    [heroChartPoints],
+  )
+  const visibleHeroChartPoints = useMemo(
+    () =>
+      getChartWindowDates(metaBudgetDate).map(
+        (reportDate) => heroChartPointsByDate.get(reportDate) ?? buildEmptyHeroChartPoint(reportDate),
+      ),
+    [heroChartPointsByDate, metaBudgetDate],
+  )
+  const chartRangeLabel = `${getShortDateLabel(visibleHeroChartPoints[0].reportDate)} - ${getShortDateLabel(
+    visibleHeroChartPoints[visibleHeroChartPoints.length - 1].reportDate,
+  )}`
+  const latestChartDate = useMemo(() => {
+    const savedLatestDate = metaReports[metaReports.length - 1]?.reportDate ?? ''
 
-    for (let index = 0; index < heroChartPoints.length; index += chartPageSize) {
-      pages.push(heroChartPoints.slice(index, index + chartPageSize))
-    }
-
-    return pages
-  }, [heroChartPoints])
-  const visibleHeroChartPoints = heroChartPages[chartPageIndex] ?? []
-  const chartRangeLabel = visibleHeroChartPoints.length
-    ? `${getShortDateLabel(visibleHeroChartPoints[0].reportDate)} - ${getShortDateLabel(
-        visibleHeroChartPoints[visibleHeroChartPoints.length - 1].reportDate,
-      )}`
-    : 'No saved dates'
+    return [getYesterdayInNewYorkDateInputValue(), savedLatestDate, metaBudgetDate].sort().at(-1) ?? metaBudgetDate
+  }, [metaBudgetDate, metaReports])
 
   const respondIoSheetDates = useMemo(() => {
     const dates = new Set(metaReports.map((report) => report.reportDate))
@@ -1125,25 +1157,6 @@ function App() {
       return nextEntries
     })
   }, [metaReports])
-
-  useEffect(() => {
-    if (!heroChartPages.length) {
-      setChartPageIndex(0)
-      return
-    }
-
-    const selectedPageIndex = heroChartPages.findIndex((page) =>
-      page.some((point) => point.reportDate === metaBudgetDate),
-    )
-
-    setChartPageIndex((currentIndex) => {
-      if (selectedPageIndex >= 0) {
-        return selectedPageIndex
-      }
-
-      return Math.min(currentIndex, heroChartPages.length - 1)
-    })
-  }, [heroChartPages, metaBudgetDate])
 
   function updateRespondIoEntry(reportDate: string, field: ReportEntryField, value: string) {
     setRespondIoEntries((currentEntries) => ({
@@ -1646,37 +1659,17 @@ function App() {
             <button
               className="chart-arrow-button"
               type="button"
-              onClick={() => {
-                const idx = heroChartPoints.findIndex((p) => p.reportDate === metaBudgetDate)
-                const prev = heroChartPoints[idx - 1]
-                if (prev) changeSelectedReportDate(prev.reportDate)
-              }}
-              disabled={heroChartPoints.length === 0 || heroChartPoints[0]?.reportDate === metaBudgetDate}
+              onClick={() => changeSelectedReportDate(addDaysToDateValue(metaBudgetDate, -1))}
               aria-label="Show previous day"
             >
               &lt;
             </button>
-            <span>
-              {heroChartPoints.length === 0
-                ? 'No data'
-                : (() => {
-                    const idx = heroChartPoints.findIndex((p) => p.reportDate === metaBudgetDate)
-                    const point = heroChartPoints[idx] ?? heroChartPoints[heroChartPoints.length - 1]
-                    return `${point?.label ?? '—'}  ${idx >= 0 ? idx + 1 : heroChartPoints.length}/${heroChartPoints.length}`
-                  })()}
-            </span>
+            <span>{getShortDateLabel(metaBudgetDate)}</span>
             <button
               className="chart-arrow-button"
               type="button"
-              onClick={() => {
-                const idx = heroChartPoints.findIndex((p) => p.reportDate === metaBudgetDate)
-                const next = heroChartPoints[idx + 1]
-                if (next) changeSelectedReportDate(next.reportDate)
-              }}
-              disabled={
-                heroChartPoints.length === 0 ||
-                heroChartPoints[heroChartPoints.length - 1]?.reportDate === metaBudgetDate
-              }
+              onClick={() => changeSelectedReportDate(addDaysToDateValue(metaBudgetDate, 1))}
+              disabled={metaBudgetDate >= latestChartDate}
               aria-label="Show next day"
             >
               &gt;
