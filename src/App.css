@@ -940,7 +940,7 @@
 
 .entry-sheet,
 .meta-budget-table {
-  min-width: 1080px;
+  min-width: 1040px;
   table-layout: fixed;
   background: #ffffff;
 }
@@ -1026,38 +1026,6 @@
 
 .calculated-cell {
   text-align: right;
-}
-
-.row-action-cell {
-  width: 42px;
-  min-width: 42px;
-  background: #fbfaf2;
-}
-
-.row-delete-button {
-  display: inline-grid;
-  width: 24px;
-  height: 24px;
-  place-items: center;
-  border: 1px solid rgba(97, 80, 43, 0.18);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
-  color: rgba(80, 67, 34, 0.64);
-  font: 850 13px/1 var(--sans);
-  cursor: pointer;
-}
-
-.row-delete-button:hover:not(:disabled),
-.row-delete-button:focus-visible {
-  border-color: rgba(166, 44, 36, 0.42);
-  background: #fff4f1;
-  color: #9f2e25;
-  outline: none;
-}
-
-.row-delete-button:disabled {
-  cursor: wait;
-  opacity: 0.5;
 }
 
 .spanish-table-wrap {
