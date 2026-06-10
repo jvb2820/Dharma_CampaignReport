@@ -825,9 +825,21 @@ function CprLineChart({
   )
 }
 
-function mergeReportToEntry(entry: ReportEntry, report: RespondIoReportResponse) {
+function shouldFillMetaEntry(value: string) {
+  return !value || value === '0'
+}
+
+function mergeReportToEntry(
+  entry: ReportEntry,
+  report: RespondIoReportResponse,
+  metaLeadsTotal?: number | null,
+) {
   return {
     ...entry,
+    meta:
+      metaLeadsTotal !== undefined && metaLeadsTotal !== null && shouldFillMetaEntry(entry.meta)
+        ? String(metaLeadsTotal)
+        : entry.meta,
     totalRespondMeta:
       report.metrics.totalRespondMeta === null
         ? entry.totalRespondMeta
@@ -1147,10 +1159,7 @@ function App() {
 
         nextEntries[report.reportDate] = {
           ...currentEntry,
-          meta:
-            !currentEntry.meta || currentEntry.meta === '0'
-              ? String(metaLeadsTotal)
-              : currentEntry.meta,
+          meta: shouldFillMetaEntry(currentEntry.meta) ? String(metaLeadsTotal) : currentEntry.meta,
         }
       })
 
@@ -1238,6 +1247,8 @@ function App() {
       setData(nextReport)
       setMetaReports((currentReports) => upsertBudgetReport(currentReports, nextReport))
       await saveMetaBudgetReport(nextReport, metaTotalSpending, nextMetaLeadsTotal)
+
+      return nextReport
     } catch (fetchError) {
       setError(fetchError instanceof Error ? fetchError.message : 'Something went wrong.')
       throw fetchError
@@ -1294,12 +1305,18 @@ function App() {
   async function fetchAllForSelectedDate() {
     const selectedDate = metaBudgetDate
     const startedAt = Date.now()
+    let fetchedMetaReport: BudgetResponse | null = null
     const steps = [
       {
         label: 'Fetching Meta budgets',
         detail: 'Adding active SMG campaign spend and Meta leads.',
         etaSeconds: 12,
-        run: () => fetchBudgets({ reportDate: selectedDate, shouldManageLoading: false }),
+        run: async () => {
+          fetchedMetaReport = await fetchBudgets({
+            reportDate: selectedDate,
+            shouldManageLoading: false,
+          })
+        },
       },
       {
         label: 'Fetching respond.io Meta',
@@ -1309,6 +1326,7 @@ function App() {
           fetchRespondIoReport('meta', {
             reportDate: selectedDate,
             shouldManageLoading: false,
+            metaBudgetReport: fetchedMetaReport,
           }),
       },
       {
@@ -1319,6 +1337,7 @@ function App() {
           fetchRespondIoReport('tiktok', {
             reportDate: selectedDate,
             shouldManageLoading: false,
+            metaBudgetReport: fetchedMetaReport,
           }),
       },
     ]
@@ -1385,6 +1404,11 @@ function App() {
     {
       reportDate = respondIoReportDate,
       shouldManageLoading = true,
+      metaBudgetReport,
+    }: {
+      reportDate?: string
+      shouldManageLoading?: boolean
+      metaBudgetReport?: BudgetResponse | null
     } = {},
   ) {
     if (shouldManageLoading) {
@@ -1421,14 +1445,20 @@ function App() {
 
       const baseReport = existingRow ? buildRespondIoReportFromRow(existingRow) : respondIoReport
       const nextReport = mergeRespondIoReport(baseReport, payload)
+      const reportForMetaLeads =
+        metaBudgetReport ??
+        metaReports.find((report) => report.reportDate === nextReport.reportDate) ??
+        null
+      const metaLeadsTotal = reportForMetaLeads ? getMetaLeadsTotal(reportForMetaLeads) : null
       const currentEntry = respondIoEntries[nextReport.reportDate] ?? emptyReportEntry
+      const mergedEntry = mergeReportToEntry(currentEntry, nextReport, metaLeadsTotal)
       const nextEntry = {
-        ...mergeReportToEntry(currentEntry, nextReport),
+        ...mergedEntry,
         average: formatAverage(
           getAverageMetaValue(
             {
               ...respondIoEntries,
-              [nextReport.reportDate]: mergeReportToEntry(currentEntry, nextReport),
+              [nextReport.reportDate]: mergedEntry,
             },
             respondIoSheetDates.includes(nextReport.reportDate)
               ? respondIoSheetDates
