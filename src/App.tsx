@@ -1861,112 +1861,120 @@ function App() {
         ) : null}
 
         <div className="sheet-table-wrap">
-          <table className="entry-sheet">
-            <caption>New Conversation Opened Respond I.O</caption>
-            <thead>
-              <tr>
-                <th>Day</th>
-                <th>Meta</th>
-                <th>Total RespMeta</th>
-                <th>New respond Meta</th>
-                <th>Total Resp TikTok</th>
-                <th>New TikTok</th>
-                <th>Average</th>
-                <th>Meta &amp; TikTok</th>
-                <th>New Meta &amp; TikTok</th>
-              </tr>
-            </thead>
-            <tbody>
-              {respondIoSheetDates.map((sheetDate) => {
-                const entry = respondIoEntries[sheetDate] ?? emptyReportEntry
-                const totalsForEntry = getReportEntryTotals(entry)
-
-                return (
-                  <tr key={sheetDate}>
-                    <th scope="row">
-                      <span className="row-label-with-action">
-                        <span>{getDayLabel(sheetDate)}</span>
-                        <button
-                          className="row-delete-button"
-                          type="button"
-                          onClick={() => deleteReportRow(sheetDate)}
-                          disabled={deletingReportDate === sheetDate}
-                          aria-label={`Delete row ${sheetDate}`}
-                          title="Delete row"
-                        >
-                          x
-                        </button>
-                      </span>
-                    </th>
-                    <td>
-                      <input
-                        aria-label={`Meta ${sheetDate}`}
-                        inputMode="numeric"
-                        value={entry.meta}
-                        onChange={(event) =>
-                          updateRespondIoEntry(sheetDate, 'meta', event.target.value)
-                        }
-                        placeholder="0"
-                      />
-                    </td>
-                    <td>
-                      <input
-                        aria-label={`Total RespMeta ${sheetDate}`}
-                        inputMode="numeric"
-                        value={entry.totalRespondMeta}
-                        onChange={(event) =>
-                          updateRespondIoEntry(sheetDate, 'totalRespondMeta', event.target.value)
-                        }
-                        placeholder="0"
-                      />
-                    </td>
-                    <td>
-                      <input
-                        aria-label={`New respond Meta ${sheetDate}`}
-                        inputMode="numeric"
-                        value={entry.newRespondMeta}
-                        onChange={(event) =>
-                          updateRespondIoEntry(sheetDate, 'newRespondMeta', event.target.value)
-                        }
-                        placeholder="0"
-                      />
-                    </td>
-                    <td>
-                      <input
-                        aria-label={`Total Resp TikTok ${sheetDate}`}
-                        inputMode="numeric"
-                        value={entry.totalRespondTiktok}
-                        onChange={(event) =>
-                          updateRespondIoEntry(sheetDate, 'totalRespondTiktok', event.target.value)
-                        }
-                        placeholder="0"
-                      />
-                    </td>
-                    <td>
-                      <input
-                        aria-label={`New TikTok ${sheetDate}`}
-                        inputMode="numeric"
-                        value={entry.newRespondTiktok}
-                        onChange={(event) =>
-                          updateRespondIoEntry(sheetDate, 'newRespondTiktok', event.target.value)
-                        }
-                        placeholder="0"
-                      />
-                    </td>
-                    <td className="calculated-cell">
-                      {formatAverage(averageMetaValue)}
-                    </td>
-                    <td className="calculated-cell">
-                      {formatSheetNumber(totalsForEntry.totalMetaAndTiktok)}
-                    </td>
-                    <td className="calculated-cell">
-                      {formatSheetNumber(totalsForEntry.newMetaAndTiktok)}
-                    </td>
+          <div className="table-with-actions">
+            <div className="table-scroll">
+              <table className="entry-sheet">
+                <caption>New Conversation Opened Respond I.O</caption>
+                <thead>
+                  <tr>
+                    <th>Day</th>
+                    <th>Meta</th>
+                    <th>Total RespMeta</th>
+                    <th>New respond Meta</th>
+                    <th>Total Resp TikTok</th>
+                    <th>New TikTok</th>
+                    <th>Average</th>
+                    <th>Meta &amp; TikTok</th>
+                    <th>New Meta &amp; TikTok</th>
                   </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {respondIoSheetDates.map((sheetDate) => {
+                    const entry = respondIoEntries[sheetDate] ?? emptyReportEntry
+                    const totalsForEntry = getReportEntryTotals(entry)
+
+                    return (
+                      <tr key={sheetDate}>
+                        <th scope="row">{getDayLabel(sheetDate)}</th>
+                        <td>
+                          <input
+                            aria-label={`Meta ${sheetDate}`}
+                            inputMode="numeric"
+                            value={entry.meta}
+                            onChange={(event) =>
+                              updateRespondIoEntry(sheetDate, 'meta', event.target.value)
+                            }
+                            placeholder="0"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            aria-label={`Total RespMeta ${sheetDate}`}
+                            inputMode="numeric"
+                            value={entry.totalRespondMeta}
+                            onChange={(event) =>
+                              updateRespondIoEntry(sheetDate, 'totalRespondMeta', event.target.value)
+                            }
+                            placeholder="0"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            aria-label={`New respond Meta ${sheetDate}`}
+                            inputMode="numeric"
+                            value={entry.newRespondMeta}
+                            onChange={(event) =>
+                              updateRespondIoEntry(sheetDate, 'newRespondMeta', event.target.value)
+                            }
+                            placeholder="0"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            aria-label={`Total Resp TikTok ${sheetDate}`}
+                            inputMode="numeric"
+                            value={entry.totalRespondTiktok}
+                            onChange={(event) =>
+                              updateRespondIoEntry(sheetDate, 'totalRespondTiktok', event.target.value)
+                            }
+                            placeholder="0"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            aria-label={`New TikTok ${sheetDate}`}
+                            inputMode="numeric"
+                            value={entry.newRespondTiktok}
+                            onChange={(event) =>
+                              updateRespondIoEntry(sheetDate, 'newRespondTiktok', event.target.value)
+                            }
+                            placeholder="0"
+                          />
+                        </td>
+                        <td className="calculated-cell">
+                          {formatAverage(averageMetaValue)}
+                        </td>
+                        <td className="calculated-cell">
+                          {formatSheetNumber(totalsForEntry.totalMetaAndTiktok)}
+                        </td>
+                        <td className="calculated-cell">
+                          {formatSheetNumber(totalsForEntry.newMetaAndTiktok)}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="row-delete-rail" aria-label="respond.io row actions">
+              <span className="rail-caption-spacer" />
+              <span className="rail-header-spacer" />
+              {respondIoSheetDates.map((sheetDate) => (
+                <span className="rail-row-action" key={sheetDate}>
+                  <button
+                    className="row-delete-button"
+                    type="button"
+                    onClick={() => deleteReportRow(sheetDate)}
+                    disabled={deletingReportDate === sheetDate}
+                    aria-label={`Delete row ${sheetDate}`}
+                    title="Delete row"
+                  >
+                    x
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
         </div>
 
         {respondIoReport ? (
@@ -2035,87 +2043,95 @@ function App() {
         </div>
 
         <div className="table-wrap">
-          <table className="meta-budget-table">
-            <caption>Campaign Performance Sheet</caption>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Meta Total Spending</th>
-                <th>Meta Leads Total</th>
-                <th>TikTok Total Spending</th>
-                <th>TikTok Leads Total</th>
-                <th>Average RESPOND Leads (TikTok &amp; Meta)</th>
-                <th>Meta CPR</th>
-                <th>TikTok CPR</th>
-                <th>Respond CPR (TikTok &amp; Meta)</th>
-              </tr>
-            </thead>
-            <tbody>
+          <div className="table-with-actions">
+            <div className="table-scroll">
+              <table className="meta-budget-table">
+                <caption>Campaign Performance Sheet</caption>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Meta Total Spending</th>
+                    <th>Meta Leads Total</th>
+                    <th>TikTok Total Spending</th>
+                    <th>TikTok Leads Total</th>
+                    <th>Average RESPOND Leads (TikTok &amp; Meta)</th>
+                    <th>Meta CPR</th>
+                    <th>TikTok CPR</th>
+                    <th>Respond CPR (TikTok &amp; Meta)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {spanishReportRows.map((row) => (
+                    <tr key={row.reportDate}>
+                      <td>{row.date}</td>
+                      <td>{row.metaSpend}</td>
+                      <td>{row.metaLeads}</td>
+                      <td>
+                        <input
+                          aria-label={`TikTok Total Spending ${row.reportDate}`}
+                          inputMode="decimal"
+                          value={
+                            metaReports.find((report) => report.reportDate === row.reportDate)
+                              ?.tiktokTotalSpending ?? ''
+                          }
+                          onChange={(event) =>
+                            updateManualTikTokField(
+                              row.reportDate,
+                              'tiktokTotalSpending',
+                              event.target.value,
+                            )
+                          }
+                          onBlur={() => saveManualTikTokField(row.reportDate)}
+                          placeholder="0.00"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          aria-label={`TikTok Leads Total ${row.reportDate}`}
+                          inputMode="numeric"
+                          value={
+                            metaReports.find((report) => report.reportDate === row.reportDate)
+                              ?.tiktokLeadsTotal ?? ''
+                          }
+                          onChange={(event) =>
+                            updateManualTikTokField(
+                              row.reportDate,
+                              'tiktokLeadsTotal',
+                              event.target.value,
+                            )
+                          }
+                          onBlur={() => saveManualTikTokField(row.reportDate)}
+                          placeholder="0"
+                        />
+                      </td>
+                      <td>{row.averageRespondLeads}</td>
+                      <td>{row.metaCpr}</td>
+                      <td>{row.tiktokCpr}</td>
+                      <td>{row.respondCpr}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="row-delete-rail" aria-label="Meta budget row actions">
+              <span className="rail-caption-spacer" />
+              <span className="rail-header-spacer" />
               {spanishReportRows.map((row) => (
-                <tr key={row.reportDate}>
-                  <td>
-                    <span className="row-label-with-action">
-                      <span>{row.date}</span>
-                      <button
-                        className="row-delete-button"
-                        type="button"
-                        onClick={() => deleteReportRow(row.reportDate)}
-                        disabled={deletingReportDate === row.reportDate}
-                        aria-label={`Delete row ${row.reportDate}`}
-                        title="Delete row"
-                      >
-                        x
-                      </button>
-                    </span>
-                  </td>
-                  <td>{row.metaSpend}</td>
-                  <td>{row.metaLeads}</td>
-                  <td>
-                    <input
-                      aria-label={`TikTok Total Spending ${row.reportDate}`}
-                      inputMode="decimal"
-                      value={
-                        metaReports.find((report) => report.reportDate === row.reportDate)
-                          ?.tiktokTotalSpending ?? ''
-                      }
-                      onChange={(event) =>
-                        updateManualTikTokField(
-                          row.reportDate,
-                          'tiktokTotalSpending',
-                          event.target.value,
-                        )
-                      }
-                      onBlur={() => saveManualTikTokField(row.reportDate)}
-                      placeholder="0.00"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      aria-label={`TikTok Leads Total ${row.reportDate}`}
-                      inputMode="numeric"
-                      value={
-                        metaReports.find((report) => report.reportDate === row.reportDate)
-                          ?.tiktokLeadsTotal ?? ''
-                      }
-                      onChange={(event) =>
-                        updateManualTikTokField(
-                          row.reportDate,
-                          'tiktokLeadsTotal',
-                          event.target.value,
-                        )
-                      }
-                      onBlur={() => saveManualTikTokField(row.reportDate)}
-                      placeholder="0"
-                    />
-                  </td>
-                  <td>{row.averageRespondLeads}</td>
-                  <td>{row.metaCpr}</td>
-                  <td>{row.tiktokCpr}</td>
-                  <td>{row.respondCpr}</td>
-                </tr>
+                <span className="rail-row-action" key={row.reportDate}>
+                  <button
+                    className="row-delete-button"
+                    type="button"
+                    onClick={() => deleteReportRow(row.reportDate)}
+                    disabled={deletingReportDate === row.reportDate}
+                    aria-label={`Delete row ${row.reportDate}`}
+                    title="Delete row"
+                  >
+                    x
+                  </button>
+                </span>
               ))}
-            </tbody>
-          </table>
+            </div>
+          </div>
         </div>
       </section>
     </main>

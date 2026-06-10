@@ -935,6 +935,18 @@
   margin-top: 18px;
   border: 1px solid rgba(80, 67, 34, 0.18);
   border-radius: 8px;
+  overflow: hidden;
+}
+
+.table-with-actions {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+}
+
+.table-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-x: auto;
 }
 
@@ -1028,26 +1040,36 @@
   text-align: right;
 }
 
-.row-label-with-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
+.row-delete-rail {
+  flex: 0 0 38px;
+  border-left: 1px solid rgba(100, 126, 88, 0.16);
+  background: rgba(247, 241, 220, 0.72);
 }
 
-td:first-child .row-label-with-action,
-td:first-child .row-label-with-action span {
-  display: inline-flex;
-  margin-top: 0;
-  color: inherit;
-  font-family: inherit;
-  font-size: inherit;
+.rail-caption-spacer,
+.rail-header-spacer,
+.rail-row-action {
+  display: grid;
+  height: 38px;
+  place-items: center;
+}
+
+.rail-caption-spacer {
+  border-bottom: 1px solid rgba(80, 67, 34, 0.18);
+  background: linear-gradient(90deg, var(--green), var(--gold));
+}
+
+.rail-header-spacer {
+  border-bottom: 1px solid rgba(100, 126, 88, 0.16);
+  background: #f3f6e9;
+}
+
+.rail-row-action {
+  border-bottom: 1px solid rgba(100, 126, 88, 0.16);
 }
 
 .row-delete-button {
   display: inline-grid;
-  flex: 0 0 auto;
   width: 22px;
   height: 22px;
   place-items: center;
@@ -1263,7 +1285,7 @@ td:first-child .row-label-with-action span {
 }
 
 .table-wrap {
-  overflow-x: auto;
+  overflow: hidden;
 }
 
 table {
