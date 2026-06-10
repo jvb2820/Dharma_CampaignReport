@@ -1551,12 +1551,10 @@ function App() {
 
     try {
       if (apiBaseUrl) {
-        const loginWindow = window.open(respondIoReportsUrl, '_blank', 'noopener,noreferrer')
+        window.open(respondIoReportsUrl, '_blank', 'noopener,noreferrer')
 
         setRespondIoReportError(
-          loginWindow
-            ? 'respond.io opened in a new tab. Automated deployed fetching still needs RESPOND_IO_ANALYTICS_ACCESS_TOKEN in Render.'
-            : 'Your browser blocked the respond.io tab. Allow popups for this site, or open respond.io manually.',
+          'respond.io opened in a new tab. Deployed fetching still needs RESPOND_IO_ANALYTICS_ACCESS_TOKEN in Render.',
         )
         return
       }

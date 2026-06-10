@@ -195,6 +195,14 @@ function respondIoReportMetricsApi(apiToken: string, analyticsToken: string): Pl
           )
 
           if (!analyticsToken) {
+            if (process.env.RENDER) {
+              sendJson(response, 500, {
+                message:
+                  'Missing RESPOND_IO_ANALYTICS_ACCESS_TOKEN in Render. Browser login only works for local saved-session fetching.',
+              })
+              return
+            }
+
             const report = await runRespondIoSessionReport(reportDate, platform)
             sendJson(response, 200, {
               ...report,
