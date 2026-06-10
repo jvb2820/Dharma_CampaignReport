@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: dharma-campaignreport
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run start:render
+    envVars:
+      - key: FACEBOOK_SYSTEM_ACCESS_TOKEN
+        sync: false
+      - key: RESPOND_IO_ACCESS_TOKEN
+        sync: false
+      - key: RESPOND_IO_ANALYTICS_ACCESS_TOKEN
+        sync: false
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
