@@ -975,6 +975,17 @@ async function saveMetaBudgetReport(
   )
 }
 
+async function deleteSavedReportRows(reportDate: string) {
+  const params = new URLSearchParams({
+    report_date: `eq.${reportDate}`,
+  })
+
+  await Promise.all([
+    supabaseRequest('meta_budget_reports', { method: 'DELETE' }, params),
+    supabaseRequest('respond_io_conversations', { method: 'DELETE' }, params),
+  ])
+}
+
 function useLoadingTick(isLoading: boolean) {
   const [tick, setTick] = useState(0)
 
@@ -1050,6 +1061,7 @@ function App() {
   const [respondIoReportError, setRespondIoReportError] = useState<string | null>(null)
   const [shouldShowRespondIoLogin, setShouldShowRespondIoLogin] = useState(false)
   const [fetchProgress, setFetchProgress] = useState<FetchProgressState>(emptyFetchProgress)
+  const [deletingReportDate, setDeletingReportDate] = useState<string | null>(null)
   useLoadingTick(isLoading)
   useLoadingTick(respondIoReportLoadingPlatform !== null)
   useLoadingTick(fetchProgress.isRunning)
@@ -1299,6 +1311,48 @@ function App() {
 
     if (data?.reportDate === reportDate && nextSelectedReport) {
       setData(nextSelectedReport)
+    }
+  }
+
+  async function deleteReportRow(reportDate: string) {
+    const shouldDelete = window.confirm(
+      `Delete the ${getShortDateLabel(reportDate)} row from this sheet and Supabase?`,
+    )
+
+    if (!shouldDelete) {
+      return
+    }
+
+    setDeletingReportDate(reportDate)
+    setError(null)
+    setRespondIoReportError(null)
+
+    try {
+      await deleteSavedReportRows(reportDate)
+      setMetaReports((currentReports) =>
+        currentReports.filter((report) => report.reportDate !== reportDate),
+      )
+      setRespondIoEntries((currentEntries) => {
+        const nextEntries = { ...currentEntries }
+        delete nextEntries[reportDate]
+        return nextEntries
+      })
+
+      if (data?.reportDate === reportDate) {
+        setData(null)
+      }
+
+      if (respondIoReport?.reportDate === reportDate) {
+        setRespondIoReport(null)
+      }
+
+      if (respondIoReportDate === reportDate) {
+        setRespondIoReportDate('')
+      }
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Unable to delete report row.')
+    } finally {
+      setDeletingReportDate(null)
     }
   }
 
@@ -1770,6 +1824,7 @@ function App() {
                 <th>Average</th>
                 <th>Meta &amp; TikTok</th>
                 <th>New Meta &amp; TikTok</th>
+                <th aria-label="Row actions"></th>
               </tr>
             </thead>
             <tbody>
@@ -1843,6 +1898,18 @@ function App() {
                     </td>
                     <td className="calculated-cell">
                       {formatSheetNumber(totalsForEntry.newMetaAndTiktok)}
+                    </td>
+                    <td className="row-action-cell">
+                      <button
+                        className="row-delete-button"
+                        type="button"
+                        onClick={() => deleteReportRow(sheetDate)}
+                        disabled={deletingReportDate === sheetDate}
+                        aria-label={`Delete row ${sheetDate}`}
+                        title="Delete row"
+                      >
+                        x
+                      </button>
                     </td>
                   </tr>
                 )
@@ -1930,6 +1997,7 @@ function App() {
                 <th>Meta CPR</th>
                 <th>TikTok CPR</th>
                 <th>Respond CPR (TikTok &amp; Meta)</th>
+                <th aria-label="Row actions"></th>
               </tr>
             </thead>
             <tbody>
@@ -1980,6 +2048,18 @@ function App() {
                   <td>{row.metaCpr}</td>
                   <td>{row.tiktokCpr}</td>
                   <td>{row.respondCpr}</td>
+                  <td className="row-action-cell">
+                    <button
+                      className="row-delete-button"
+                      type="button"
+                      onClick={() => deleteReportRow(row.reportDate)}
+                      disabled={deletingReportDate === row.reportDate}
+                      aria-label={`Delete row ${row.reportDate}`}
+                      title="Delete row"
+                    >
+                      x
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
