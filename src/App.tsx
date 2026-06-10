@@ -127,6 +127,8 @@ type HeroChartPoint = {
   respondCpr: number | null
 }
 
+type NullableCampaignMetric = 'spendYesterday' | 'resultsYesterday'
+
 const emptyReportEntry: ReportEntry = {
   meta: '',
   totalRespondMeta: '',
@@ -248,7 +250,11 @@ function parseEntryNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function formatSheetNumber(value: number) {
+function formatSheetNumber(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return ''
+  }
+
   return value ? numberFormatter.format(value) : '0'
 }
 
@@ -408,12 +414,35 @@ function getBudgetTotals(report: BudgetResponse | null) {
   )
 }
 
+function sumNullableCampaignMetric(
+  campaigns: CampaignBudget[],
+  metric: NullableCampaignMetric,
+) {
+  let hasValue = false
+  const total = campaigns.reduce((sum, campaign) => {
+    const value = campaign[metric]
+
+    if (value === null || value === undefined) {
+      return sum
+    }
+
+    hasValue = true
+    return sum + value
+  }, 0)
+
+  return hasValue ? total : null
+}
+
 function getMetaLeadsTotal(report: BudgetResponse) {
-  return report.metaLeadsTotal ?? getBudgetTotals(report).resultsYesterday
+  return report.metaLeadsTotal !== undefined
+    ? report.metaLeadsTotal
+    : sumNullableCampaignMetric(report.campaigns ?? [], 'resultsYesterday')
 }
 
 function getMetaTotalSpending(report: BudgetResponse) {
-  return report.metaTotalSpending ?? getBudgetTotals(report).spendYesterday
+  return report.metaTotalSpending !== undefined
+    ? report.metaTotalSpending
+    : sumNullableCampaignMetric(report.campaigns ?? [], 'spendYesterday')
 }
 
 function formatCostPerResult(spend: number | null | undefined, leads: number | null | undefined) {
@@ -443,7 +472,7 @@ function buildSpanishReportRow(report: BudgetResponse, respondIoEntry?: ReportEn
     : null
   const averageRespondLeads =
     averageRespondLeadsValue === null ? '' : formatSheetNumber(averageRespondLeadsValue)
-  const totalRespondSpend = metaSpend + (report.tiktokTotalSpending ?? 0)
+  const totalRespondSpend = (metaSpend ?? 0) + (report.tiktokTotalSpending ?? 0)
 
   return {
     reportDate: report.reportDate,
@@ -465,7 +494,7 @@ function buildHeroChartPoint(report: BudgetResponse, respondIoEntry?: ReportEntr
     : { totalMetaAndTiktok: 0, newMetaAndTiktok: 0 }
   const respondMetaLeads = respondIoEntry ? parseEntryNumber(respondIoEntry.totalRespondMeta) : 0
   const respondTiktokLeads = respondIoEntry ? parseEntryNumber(respondIoEntry.totalRespondTiktok) : 0
-  const totalRespondSpend = metaSpend + (report.tiktokTotalSpending ?? 0)
+  const totalRespondSpend = (metaSpend ?? 0) + (report.tiktokTotalSpending ?? 0)
 
   return {
     reportDate: report.reportDate,
@@ -955,8 +984,8 @@ async function loadSavedMetaBudgetReports() {
 
 async function saveMetaBudgetReport(
   report: BudgetResponse,
-  metaTotalSpending: number,
-  metaLeadsTotal: number,
+  metaTotalSpending: number | null,
+  metaLeadsTotal: number | null,
 ) {
   const body = {
     report_date: report.reportDate,
@@ -982,6 +1011,17 @@ async function saveMetaBudgetReport(
       },
     },
   )
+}
+
+async function deleteSavedReportRows(reportDate: string) {
+  const params = new URLSearchParams({
+    report_date: `eq.${reportDate}`,
+  })
+
+  await Promise.all([
+    supabaseRequest('meta_budget_reports', { method: 'DELETE' }, params),
+    supabaseRequest('respond_io_conversations', { method: 'DELETE' }, params),
+  ])
 }
 
 function useLoadingTick(isLoading: boolean) {
@@ -1059,6 +1099,7 @@ function App() {
   const [respondIoReportError, setRespondIoReportError] = useState<string | null>(null)
   const [shouldShowRespondIoLogin, setShouldShowRespondIoLogin] = useState(false)
   const [fetchProgress, setFetchProgress] = useState<FetchProgressState>(emptyFetchProgress)
+  const [deletingReportDate, setDeletingReportDate] = useState<string | null>(null)
   useLoadingTick(isLoading)
   useLoadingTick(respondIoReportLoadingPlatform !== null)
   useLoadingTick(fetchProgress.isRunning)
@@ -1168,7 +1209,10 @@ function App() {
 
         nextEntries[report.reportDate] = {
           ...currentEntry,
-          meta: shouldFillMetaEntry(currentEntry.meta) ? String(metaLeadsTotal) : currentEntry.meta,
+          meta:
+            metaLeadsTotal !== null && shouldFillMetaEntry(currentEntry.meta)
+              ? String(metaLeadsTotal)
+              : currentEntry.meta,
         }
       })
 
@@ -1235,17 +1279,17 @@ function App() {
         throw new Error(payload?.message ?? 'Facebook data fetch failed.')
       }
 
-      const metaTotalSpending = (payload.campaigns ?? []).reduce(
-        (total: number, campaign: CampaignBudget) => total + (campaign.spendYesterday ?? 0),
-        0,
+      const nextMetaTotalSpending = sumNullableCampaignMetric(
+        payload.campaigns ?? [],
+        'spendYesterday',
       )
-      const nextMetaLeadsTotal = (payload.campaigns ?? []).reduce(
-        (total: number, campaign: CampaignBudget) => total + (campaign.resultsYesterday ?? 0),
-        0,
+      const nextMetaLeadsTotal = sumNullableCampaignMetric(
+        payload.campaigns ?? [],
+        'resultsYesterday',
       )
       const nextReport = {
         ...payload,
-        metaTotalSpending,
+        metaTotalSpending: nextMetaTotalSpending,
         metaLeadsTotal: nextMetaLeadsTotal,
         tiktokTotalSpending: metaReports.find((report) => report.reportDate === payload.reportDate)
           ?.tiktokTotalSpending,
@@ -1255,7 +1299,7 @@ function App() {
 
       setData(nextReport)
       setMetaReports((currentReports) => upsertBudgetReport(currentReports, nextReport))
-      await saveMetaBudgetReport(nextReport, metaTotalSpending, nextMetaLeadsTotal)
+      await saveMetaBudgetReport(nextReport, nextMetaTotalSpending, nextMetaLeadsTotal)
 
       return nextReport
     } catch (fetchError) {
@@ -1308,6 +1352,48 @@ function App() {
 
     if (data?.reportDate === reportDate && nextSelectedReport) {
       setData(nextSelectedReport)
+    }
+  }
+
+  async function deleteReportRow(reportDate: string) {
+    const shouldDelete = window.confirm(
+      `Delete the ${getShortDateLabel(reportDate)} row from this sheet and Supabase?`,
+    )
+
+    if (!shouldDelete) {
+      return
+    }
+
+    setDeletingReportDate(reportDate)
+    setError(null)
+    setRespondIoReportError(null)
+
+    try {
+      await deleteSavedReportRows(reportDate)
+      setMetaReports((currentReports) =>
+        currentReports.filter((report) => report.reportDate !== reportDate),
+      )
+      setRespondIoEntries((currentEntries) => {
+        const nextEntries = { ...currentEntries }
+        delete nextEntries[reportDate]
+        return nextEntries
+      })
+
+      if (data?.reportDate === reportDate) {
+        setData(null)
+      }
+
+      if (respondIoReport?.reportDate === reportDate) {
+        setRespondIoReport(null)
+      }
+
+      if (respondIoReportDate === reportDate) {
+        setRespondIoReportDate('')
+      }
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Unable to delete report row.')
+    } finally {
+      setDeletingReportDate(null)
     }
   }
 
@@ -1797,7 +1883,21 @@ function App() {
 
                 return (
                   <tr key={sheetDate}>
-                    <th scope="row">{getDayLabel(sheetDate)}</th>
+                    <th scope="row">
+                      <span className="row-label-with-action">
+                        <span>{getDayLabel(sheetDate)}</span>
+                        <button
+                          className="row-delete-button"
+                          type="button"
+                          onClick={() => deleteReportRow(sheetDate)}
+                          disabled={deletingReportDate === sheetDate}
+                          aria-label={`Delete row ${sheetDate}`}
+                          title="Delete row"
+                        >
+                          x
+                        </button>
+                      </span>
+                    </th>
                     <td>
                       <input
                         aria-label={`Meta ${sheetDate}`}
@@ -1953,7 +2053,21 @@ function App() {
             <tbody>
               {spanishReportRows.map((row) => (
                 <tr key={row.reportDate}>
-                  <td>{row.date}</td>
+                  <td>
+                    <span className="row-label-with-action">
+                      <span>{row.date}</span>
+                      <button
+                        className="row-delete-button"
+                        type="button"
+                        onClick={() => deleteReportRow(row.reportDate)}
+                        disabled={deletingReportDate === row.reportDate}
+                        aria-label={`Delete row ${row.reportDate}`}
+                        title="Delete row"
+                      >
+                        x
+                      </button>
+                    </span>
+                  </td>
                   <td>{row.metaSpend}</td>
                   <td>{row.metaLeads}</td>
                   <td>

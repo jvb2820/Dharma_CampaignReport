@@ -1028,6 +1028,50 @@
   text-align: right;
 }
 
+.row-label-with-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+}
+
+td:first-child .row-label-with-action,
+td:first-child .row-label-with-action span {
+  display: inline-flex;
+  margin-top: 0;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.row-delete-button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid rgba(97, 80, 43, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.66);
+  color: rgba(80, 67, 34, 0.56);
+  font: 850 12px/1 var(--sans);
+  cursor: pointer;
+}
+
+.row-delete-button:hover:not(:disabled),
+.row-delete-button:focus-visible {
+  border-color: rgba(166, 44, 36, 0.42);
+  background: #fff4f1;
+  color: #9f2e25;
+  outline: none;
+}
+
+.row-delete-button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
 .spanish-table-wrap {
   border-color: rgba(20, 13, 3, 0.22);
 }

@@ -86,6 +86,13 @@ to anon
 using (true)
 with check (true);
 
+drop policy if exists "Allow anon delete respond io conversations" on public.respond_io_conversations;
+create policy "Allow anon delete respond io conversations"
+on public.respond_io_conversations
+for delete
+to anon
+using (true);
+
 drop policy if exists "Allow anon read meta budget reports" on public.meta_budget_reports;
 create policy "Allow anon read meta budget reports"
 on public.meta_budget_reports
@@ -107,3 +114,10 @@ for update
 to anon
 using (true)
 with check (true);
+
+drop policy if exists "Allow anon delete meta budget reports" on public.meta_budget_reports;
+create policy "Allow anon delete meta budget reports"
+on public.meta_budget_reports
+for delete
+to anon
+using (true);
