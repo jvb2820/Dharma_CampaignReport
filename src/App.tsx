@@ -147,6 +147,7 @@ const numberFormatter = new Intl.NumberFormat('en-US')
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+const respondIoReportsUrl = 'https://app.respond.io/space/238284/reports/conversations'
 const totalFetchSteps = 3
 const emptyFetchProgress: FetchProgressState = {
   isRunning: false,
@@ -1533,7 +1534,7 @@ function App() {
       setShouldShowRespondIoLogin(isRespondIoSessionError(message))
       setRespondIoReportError(
         isRespondIoSessionError(message)
-          ? 'Login to respond.io to unlock automated report fetching.'
+          ? 'respond.io automation needs RESPOND_IO_ANALYTICS_ACCESS_TOKEN in Render, or a local saved browser session.'
           : message,
       )
       throw fetchError
@@ -1549,6 +1550,17 @@ function App() {
     setRespondIoReportError(null)
 
     try {
+      if (apiBaseUrl) {
+        const loginWindow = window.open(respondIoReportsUrl, '_blank', 'noopener,noreferrer')
+
+        setRespondIoReportError(
+          loginWindow
+            ? 'respond.io opened in a new tab. Automated deployed fetching still needs RESPOND_IO_ANALYTICS_ACCESS_TOKEN in Render.'
+            : 'Your browser blocked the respond.io tab. Allow popups for this site, or open respond.io manually.',
+        )
+        return
+      }
+
       const response = await fetch(getApiUrl('/api/respondio-login'))
       const payload = await readJsonResponse<{ message?: string }>(
         response,
@@ -1560,7 +1572,7 @@ function App() {
       }
 
       setRespondIoReportError(
-        'A respond.io login window opened. Log in, open Reports > Conversations, close that window, then fetch again.',
+        'A local respond.io login window opened. Log in, open Reports > Conversations, close that window, then fetch again.',
       )
     } catch (loginError) {
       setRespondIoReportError(
@@ -1796,8 +1808,8 @@ function App() {
         {shouldShowRespondIoLogin ? (
           <div className="login-prompt">
             <div>
-              <strong>respond.io login required</strong>
-              <span>Log in, open Reports &gt; Conversations, close the login window, then fetch again.</span>
+              <strong>respond.io automation setup required</strong>
+              <span>Add RESPOND_IO_ANALYTICS_ACCESS_TOKEN in Render, or use a local saved session.</span>
             </div>
             <button
               className="fetch-button secondary"
