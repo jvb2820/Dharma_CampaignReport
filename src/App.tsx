@@ -175,7 +175,15 @@ function getSupabaseRestUrl(path: string, params?: URLSearchParams) {
 }
 
 function getApiUrl(path: string) {
-  return `${apiBaseUrl}${path}`
+  return `${getActiveApiBaseUrl()}${path}`
+}
+
+function getActiveApiBaseUrl() {
+  if (typeof window === 'undefined') {
+    return apiBaseUrl
+  }
+
+  return ['localhost', '127.0.0.1'].includes(window.location.hostname) ? '' : apiBaseUrl
 }
 
 async function supabaseRequest<T>(
@@ -1550,7 +1558,7 @@ function App() {
     setRespondIoReportError(null)
 
     try {
-      if (apiBaseUrl) {
+      if (getActiveApiBaseUrl()) {
         window.open(respondIoReportsUrl, '_blank', 'noopener,noreferrer')
 
         setRespondIoReportError(
