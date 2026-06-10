@@ -1,6 +1,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { openSync } from 'node:fs'
 import type { ServerResponse } from 'node:http'
+import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -156,8 +157,8 @@ function respondIoReportMetricsApi(apiToken: string, analyticsToken: string): Pl
         try {
           const stdout = openSync('respond-login.out.log', 'a')
           const stderr = openSync('respond-login.err.log', 'a')
-          const child = spawn(process.execPath, ['scripts/respond-login.mjs', '--profile'], {
-            cwd: process.cwd(),
+          const child = spawnNodeScript(['respond-login.mjs', '--profile'], {
+            cwd: getAppRoot(),
             detached: true,
             stdio: ['ignore', stdout, stderr],
           })
@@ -252,8 +253,8 @@ function tiktokAdsManagerApi(): Plugin {
         try {
           const stdout = openSync('tiktok-login.out.log', 'a')
           const stderr = openSync('tiktok-login.err.log', 'a')
-          const child = spawn(process.execPath, ['scripts/tiktok-login.mjs'], {
-            cwd: process.cwd(),
+          const child = spawnNodeScript(['tiktok-login.mjs'], {
+            cwd: getAppRoot(),
             detached: true,
             stdio: ['ignore', stdout, stderr],
           })
@@ -275,22 +276,18 @@ function tiktokAdsManagerApi(): Plugin {
           const requestUrl = new URL(request.url ?? '', 'http://localhost')
           const reportDate = requestUrl.searchParams.get('date') || getYesterdayInNewYork()
           const mode = requestUrl.searchParams.get('mode')
-          const args = ['scripts/tiktok-report.mjs', `--date=${reportDate}`]
+          const args = ['tiktok-report.mjs', `--date=${reportDate}`]
 
           if (mode === 'manual') {
             args.push('--manual')
           }
 
-          const { stdout } = await execFileAsync(
-            process.execPath,
-            args,
-            {
-              cwd: process.cwd(),
-              timeout: 120_000,
-            },
-          )
+          const { stdout } = await execNodeScript(args, {
+            cwd: getAppRoot(),
+            timeout: 120_000,
+          })
 
-          sendJson(response, 200, JSON.parse(stdout))
+          sendJson(response, 200, JSON.parse(String(stdout)))
         } catch (error) {
           const message =
             error && typeof error === 'object' && 'stderr' in error
@@ -308,16 +305,15 @@ function tiktokAdsManagerApi(): Plugin {
 
 async function runRespondIoSessionReport(reportDate: string, platform: string) {
   try {
-    const { stdout } = await execFileAsync(
-      process.execPath,
-      ['scripts/respond-report.mjs', `--date=${reportDate}`, `--platform=${platform}`],
+    const { stdout } = await execNodeScript(
+      ['respond-report.mjs', `--date=${reportDate}`, `--platform=${platform}`],
       {
-        cwd: process.cwd(),
+        cwd: getAppRoot(),
         timeout: 120_000,
       },
     )
 
-    return JSON.parse(stdout) as {
+    return JSON.parse(String(stdout)) as {
       reportDate: string
       timezone: string
       excludedTiktokChannel?: RespondIoChannel
@@ -336,6 +332,44 @@ async function runRespondIoSessionReport(reportDate: string, platform: string) {
 
     throw new Error(message, { cause: error })
   }
+}
+
+function getNodeScriptEnv() {
+  return process.versions.electron
+    ? { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+    : process.env
+}
+
+function getAppRoot() {
+  return process.env.DHARMA_APP_ROOT || process.cwd()
+}
+
+function resolveScriptArg(scriptName: string) {
+  return resolve(getAppRoot(), 'scripts', scriptName)
+}
+
+function spawnNodeScript(
+  args: string[],
+  options: Parameters<typeof spawn>[2],
+) {
+  const [scriptName, ...scriptArgs] = args
+
+  return spawn(process.execPath, [resolveScriptArg(scriptName), ...scriptArgs], {
+    ...options,
+    env: getNodeScriptEnv(),
+  })
+}
+
+function execNodeScript(
+  args: string[],
+  options: Parameters<typeof execFile>[2],
+) {
+  const [scriptName, ...scriptArgs] = args
+
+  return execFileAsync(process.execPath, [resolveScriptArg(scriptName), ...scriptArgs], {
+    ...options,
+    env: getNodeScriptEnv(),
+  })
 }
 
 function parseRespondReportError(stderr: string) {

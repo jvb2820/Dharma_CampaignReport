@@ -3,10 +3,13 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "start:render": "vite --host 0.0.0.0 --port $PORT",
     "build": "tsc -b && vite build",
+    "desktop": "electron .",
+    "dist:win": "npm run build && electron-builder --win portable",
     "lint": "eslint .",
     "preview": "vite preview",
     "respond:login": "node scripts/respond-login.mjs",
@@ -15,22 +18,47 @@
     "tiktok:report": "node scripts/tiktok-report.mjs"
   },
   "dependencies": {
+    "@vitejs/plugin-react": "^6.0.2",
+    "playwright": "^1.60.0",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "vite": "^8.0.16"
+  },
+  "build": {
+    "appId": "com.dharma.campaignreport",
+    "productName": "Dharma Campaign Report",
+    "asar": false,
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "scripts/**/*",
+      "src/**/*",
+      "public/**/*",
+      "index.html",
+      "vite.config.ts",
+      "tsconfig*.json",
+      "package.json",
+      ".env.local"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "artifactName": "${productName}-${version}-portable.${ext}"
+    }
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.12.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.1",
+    "electron": "^42.4.0",
+    "electron-builder": "^26.15.2",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
-    "playwright": "^1.60.0",
     "typescript": "~6.0.2",
-    "typescript-eslint": "^8.59.2",
-    "vite": "^8.0.12"
+    "typescript-eslint": "^8.59.2"
   }
 }
