@@ -959,6 +959,8 @@
 
 .entry-sheet caption,
 .meta-budget-table caption {
+  box-sizing: border-box;
+  height: 38px;
   padding: 9px 10px;
   border-bottom: 1px solid rgba(80, 67, 34, 0.18);
   background: linear-gradient(90deg, var(--green), var(--gold));
@@ -986,10 +988,12 @@
 
 .entry-sheet thead th,
 .meta-budget-table thead th {
+  height: 54px;
   background: #f3f6e9;
   color: var(--green-deep);
   font-size: 12px;
   font-weight: 850;
+  line-height: 1.2;
   text-transform: none;
 }
 
@@ -1060,6 +1064,7 @@
 }
 
 .rail-header-spacer {
+  height: 54px;
   border-bottom: 1px solid rgba(100, 126, 88, 0.16);
   background: #f3f6e9;
 }
