@@ -408,6 +408,16 @@
   stroke-width: 2px;
 }
 
+.mini-chart .bar-value-label {
+  fill: var(--label-color);
+  font: 800 6.5px/1 var(--sans);
+  letter-spacing: 0;
+  paint-order: stroke;
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-linejoin: round;
+  stroke-width: 2px;
+}
+
 .chart-empty-label {
   fill: #8a9e87;
   font: 600 10px/1 var(--sans);

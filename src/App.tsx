@@ -569,6 +569,25 @@ function getPointX(index: number, total: number, left: number, width: number) {
   return left + (index * width) / (total - 1)
 }
 
+function DeltaBadge({ delta }: { delta: number | null }) {
+  if (delta === null) return null
+  const up = delta >= 0
+
+  return (
+    <span
+      style={{
+        marginLeft: 5,
+        color: up ? '#41b879' : '#f0475e',
+        fontWeight: 900,
+        fontSize: 11,
+        letterSpacing: 0,
+      }}
+    >
+      {up ? '▲' : '▼'} {Math.abs(delta)}
+    </span>
+  )
+}
+
 function PerformanceBarChart({
   activeReportDate,
   points,
@@ -614,24 +633,6 @@ function PerformanceBarChart({
   const halfGroupWidth = ((series.length - 1) / 2) * (barWidth + 2) + barWidth / 2
   const xLeft = chartLeft + halfGroupWidth + 4
   const xRight = chartWidth - 14 - halfGroupWidth - 4
-
-  function DeltaBadge({ delta }: { delta: number | null }) {
-    if (delta === null) return null
-    const up = delta >= 0
-    return (
-      <span
-        style={{
-          marginLeft: 5,
-          color: up ? '#41b879' : '#f0475e',
-          fontWeight: 900,
-          fontSize: 11,
-          letterSpacing: 0,
-        }}
-      >
-        {up ? '▲' : '▼'} {Math.abs(delta)}
-      </span>
-    )
-  }
 
   return (
     <article className="report-chart-card">
@@ -692,17 +693,29 @@ function PerformanceBarChart({
                   const height = (value / maxValue) * chartAreaHeight
                   const barX = x + (seriesIndex - 1.5) * (barWidth + 2)
                   const barY = chartTop + chartAreaHeight - height
+                  const labelX = barX + barWidth / 2
+                  const labelY = Math.max(8, barY - 3)
 
                   return (
-                    <rect
-                      key={item.key}
-                      x={barX}
-                      y={barY}
-                      width={barWidth}
-                      height={height}
-                      rx="2"
-                      fill={item.color}
-                    />
+                    <g key={item.key}>
+                      <rect
+                        x={barX}
+                        y={barY}
+                        width={barWidth}
+                        height={height}
+                        rx="2"
+                        fill={item.color}
+                      />
+                      <text
+                        x={labelX}
+                        y={labelY}
+                        textAnchor="middle"
+                        className="bar-value-label"
+                        style={{ '--label-color': item.color } as CSSProperties}
+                      >
+                        {formatSheetNumber(value)}
+                      </text>
+                    </g>
                   )
                 })}
                 <text x={x} y={chartTop + chartAreaHeight + 18} textAnchor="middle">
