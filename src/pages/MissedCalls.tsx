@@ -6,7 +6,7 @@ function MissedCalls() {
           <p className="eyebrow">Call intelligence</p>
           <h1 id="missed-calls-title">Missed Calls</h1>
           <p>
-            Track missed-call activity here without changing the campaign reporting workflow.
+            Track missed-call activity here
           </p>
         </div>
 
