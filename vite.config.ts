@@ -1023,6 +1023,9 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
   return {
+    server: {
+      allowedHosts: ['dharma-campaignreport-1.onrender.com'],
+    },
     plugins: [
       react(),
       facebookBudgetApi(env.FACEBOOK_SYSTEM_ACCESS_TOKEN ?? ''),
