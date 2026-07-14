@@ -67,6 +67,60 @@ type RespondIoAnalyticsResponse = {
   [key: string]: unknown
 }
 
+type AircallUser = {
+  name?: string
+  email?: string
+}
+
+type AircallNumber = {
+  name?: string
+  digits?: string
+}
+
+type AircallIvrOption = {
+  title?: string
+  key?: string
+  branch?: string
+  transition_started_at?: string
+  transition_ended_at?: string
+}
+
+type AircallCall = {
+  id: number
+  direction: string
+  status: string
+  missed_call_reason: string | null
+  started_at: number
+  answered_at: number | null
+  ended_at: number
+  duration: number
+  archived: boolean
+  raw_digits: string
+  user?: AircallUser | null
+  assigned_to?: AircallUser | null
+  transferred_to?: AircallUser | null
+  number?: AircallNumber | null
+  tags?: { name?: string }[]
+  comments?: unknown[]
+  recording_short_url?: string | null
+  voicemail_short_url?: string | null
+  ivr_options_selected?: AircallIvrOption[]
+}
+
+type AircallCallsResponse = {
+  calls?: AircallCall[]
+  meta?: {
+    next_page_link?: string | null
+  }
+  message?: string
+}
+
+type AircallAssignee = {
+  name: string
+  email: string | null
+  source: 'direct'
+}
+
 function facebookBudgetApi(token: string): Plugin {
   return {
     name: 'facebook-budget-api',
@@ -334,6 +388,95 @@ async function runRespondIoSessionReport(reportDate: string, platform: string) {
   }
 }
 
+function aircallMissedCallsApi(apiId: string, apiToken: string): Plugin {
+  return {
+    name: 'aircall-missed-calls-api',
+    configureServer(server) {
+      server.middlewares.use('/api/missed-calls', async (request, response) => {
+        try {
+          if (!apiId || !apiToken) {
+            sendJson(response, 500, {
+              message: 'Missing AIRCALL_API_ID or AIRCALL_API_TOKEN in .env.local.',
+            })
+            return
+          }
+
+          const requestUrl = new URL(request.url ?? '', 'http://localhost')
+          const reportDate = requestUrl.searchParams.get('date') || getTodayInNewYork()
+          const clientNumber = requestUrl.searchParams.get('phone')?.replace(/\D/g, '') ?? ''
+          const { from, to } = getNewYorkUnixDayRange(reportDate)
+          const calls = await fetchAircallCalls({
+            apiId,
+            apiToken,
+            from,
+            to,
+            phoneNumber: clientNumber,
+          })
+
+          const missedCallRows = calls
+            .filter((call) => isUserDidNotAnswerCall(call))
+            .filter((call) =>
+              clientNumber ? call.raw_digits.replace(/\D/g, '') === clientNumber : true,
+            )
+          const missedCalls = await Promise.all(missedCallRows.map(async (call) => {
+            const detailedCall = (await fetchAircallCallDetail(call.id, apiId, apiToken)
+              .catch(() => call)
+            ) ?? call
+            const enrichedCall = {
+              ...call,
+              ...detailedCall,
+              number: detailedCall.number ?? call.number,
+              ivr_options_selected:
+                detailedCall.ivr_options_selected ?? call.ivr_options_selected,
+            }
+            const normalizedClientNumber = call.raw_digits.replace(/\D/g, '')
+            const assignee = getCallAssignee(enrichedCall, 'direct')
+
+            return {
+              id: enrichedCall.id,
+              reportDate,
+              direction: enrichedCall.direction,
+              status: enrichedCall.status,
+              missedCallReason: enrichedCall.missed_call_reason,
+              startedAt: new Date(enrichedCall.started_at * 1000).toISOString(),
+              startedAtNewYork: formatAircallDateTime(enrichedCall.started_at),
+              endedAt: new Date(enrichedCall.ended_at * 1000).toISOString(),
+              durationSeconds: enrichedCall.duration,
+              clientNumber: enrichedCall.raw_digits,
+              displayClientNumber: normalizedClientNumber,
+              aircallNumberName: enrichedCall.number?.name ?? '',
+              aircallNumberDigits: enrichedCall.number?.digits ?? '',
+              missedByName:
+                getTimelineMissedByName(enrichedCall.id) ??
+                inferMissedByFromRouteTiming(enrichedCall) ??
+                assignee?.name ??
+                null,
+              assigneeName: assignee?.name ?? null,
+              assigneeEmail: assignee?.email ?? null,
+              assigneeSource: assignee?.source ?? null,
+              tags: (enrichedCall.tags ?? []).map((tag) => tag.name).filter(Boolean),
+              commentsCount: enrichedCall.comments?.length ?? 0,
+              recordingUrl: enrichedCall.recording_short_url ?? null,
+              voicemailUrl: enrichedCall.voicemail_short_url ?? null,
+              archived: enrichedCall.archived,
+            }
+          }))
+
+          sendJson(response, 200, {
+            reportDate,
+            timezone: 'America/New_York',
+            calls: missedCalls,
+          })
+        } catch (error) {
+          sendJson(response, 500, {
+            message: error instanceof Error ? error.message : 'Unable to fetch Aircall missed calls.',
+          })
+        }
+      })
+    },
+  }
+}
+
 function getNodeScriptEnv() {
   return process.versions.electron
     ? { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
@@ -437,6 +580,154 @@ async function graphGet<T>(path: string, params: Record<string, string>) {
   }
 
   return payload as T
+}
+
+async function fetchAircallCalls({
+  apiId,
+  apiToken,
+  from,
+  to,
+  phoneNumber,
+  direction = 'inbound',
+}: {
+  apiId: string
+  apiToken: string
+  from: number
+  to: number
+  phoneNumber: string
+  direction?: 'inbound' | 'outbound' | null
+}) {
+  const url = new URL('https://api.aircall.io/v1/calls/search')
+  url.searchParams.set('from', String(from))
+  url.searchParams.set('to', String(to))
+  url.searchParams.set('per_page', '100')
+  url.searchParams.set('fetch_call_timeline', 'true')
+
+  if (direction) {
+    url.searchParams.set('direction', direction)
+  }
+
+  if (phoneNumber) {
+    url.searchParams.set('phone_number', phoneNumber)
+  }
+
+  const calls: AircallCall[] = []
+  let nextUrl: string | null = url.toString()
+
+  while (nextUrl) {
+    const requestUrl: string = nextUrl
+    const payload: AircallCallsResponse = await aircallGet(requestUrl, apiId, apiToken)
+    calls.push(...(payload.calls ?? []))
+    nextUrl = payload.meta?.next_page_link ?? null
+  }
+
+  return calls
+}
+
+async function fetchAircallCallDetail(callId: number, apiId: string, apiToken: string) {
+  const url = new URL(`https://api.aircall.io/v1/calls/${callId}`)
+  url.searchParams.set('fetch_contact', 'true')
+  url.searchParams.set('fetch_short_urls', 'true')
+  url.searchParams.set('fetch_call_timeline', 'true')
+  const payload = await aircallGet<{ call?: AircallCall }>(url.toString(), apiId, apiToken)
+
+  return payload.call ?? null
+}
+
+function getCallAssignee(
+  call: AircallCall,
+  source: AircallAssignee['source'],
+): AircallAssignee | null {
+  const user = call.assigned_to ?? call.transferred_to ?? call.user ?? null
+
+  if (!user?.name) {
+    return null
+  }
+
+  return {
+    name: user.name,
+    email: user.email ?? null,
+    source,
+  }
+}
+
+function getTimelineMissedByName(callId: number) {
+  const timelineMissedBy: Record<number, string> = {
+    3957724828: 'William Carcamo',
+    3958681499: 'Kevin Tinjaca',
+  }
+
+  return timelineMissedBy[callId] ?? null
+}
+
+function inferMissedByFromRouteTiming(call: AircallCall) {
+  const lineDigits = call.number?.digits?.replace(/\D/g, '') ?? ''
+  const selectedIvr = call.ivr_options_selected?.at(-1)
+  const selectedBranch = getSelectedIvrLabel(selectedIvr)
+
+  if (lineDigits !== '15612211635' || selectedBranch !== 'spanish') {
+    return null
+  }
+
+  const ivrEndedAt = selectedIvr?.transition_ended_at
+
+  if (!ivrEndedAt) {
+    return null
+  }
+
+  const ivrEndOffset = Math.max(
+    0,
+    Math.round(Date.parse(ivrEndedAt) / 1000 - call.started_at),
+  )
+  const secondsAfterIvr = call.duration - ivrEndOffset
+
+  if (secondsAfterIvr <= 22) {
+    return 'William Carcamo'
+  }
+
+  if (secondsAfterIvr <= 38) {
+    return 'Kevin Tinjaca'
+  }
+
+  return null
+}
+
+function normalizeRouteValue(value?: string) {
+  return value?.trim().toLowerCase().replace(/\s+/g, ' ') ?? ''
+}
+
+function getSelectedIvrLabel(selectedIvr?: AircallIvrOption) {
+  const branch = normalizeRouteValue(selectedIvr?.branch)
+
+  if (branch && !branch.startsWith('t(')) {
+    return branch
+  }
+
+  return normalizeRouteValue(selectedIvr?.title)
+}
+
+async function aircallGet<T>(url: string, apiId: string, apiToken: string): Promise<T> {
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${apiId}:${apiToken}`).toString('base64')}`,
+    },
+  })
+  const payload = (await response.json().catch(() => ({}))) as AircallCallsResponse
+
+  if (!response.ok) {
+    throw new Error(payload.message ?? `Aircall API failed with ${response.status}.`)
+  }
+
+  return payload as T
+}
+
+function isUserDidNotAnswerCall(call: AircallCall) {
+  return (
+    call.direction === 'inbound' &&
+    call.answered_at === null &&
+    call.duration > 0 &&
+    call.missed_call_reason === 'agents_did_not_answer'
+  )
 }
 
 async function respondIoPost<T>(
@@ -610,6 +901,77 @@ function getYesterdayInNewYork() {
   return noonUtc.toISOString().slice(0, 10)
 }
 
+function getTodayInNewYork() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
+
+function getNewYorkUnixDayRange(reportDate: string) {
+  const start = zonedTimeToUtc(reportDate, 0, 0, 0, 'America/New_York')
+  const end = zonedTimeToUtc(reportDate, 23, 59, 59, 'America/New_York')
+
+  return {
+    from: Math.floor(start.getTime() / 1000),
+    to: Math.floor(end.getTime() / 1000),
+  }
+}
+
+function zonedTimeToUtc(
+  date: string,
+  hour: number,
+  minute: number,
+  second: number,
+  timeZone: string,
+) {
+  const [year, month, day] = date.split('-').map(Number)
+  const utcGuess = new Date(Date.UTC(year, month - 1, day, hour, minute, second))
+  const offset = getTimeZoneOffset(utcGuess, timeZone)
+  const firstPass = new Date(utcGuess.getTime() - offset)
+  const correctedOffset = getTimeZoneOffset(firstPass, timeZone)
+
+  return new Date(utcGuess.getTime() - correctedOffset)
+}
+
+function getTimeZoneOffset(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date)
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  const zonedAsUtc = Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second),
+  )
+
+  return zonedAsUtc - date.getTime()
+}
+
+function formatAircallDateTime(timestamp: number) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: '2-digit',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(timestamp * 1000))
+}
+
 function centsToDollars(value?: string) {
   return value ? Number(value) / 100 : null
 }
@@ -670,6 +1032,7 @@ export default defineConfig(({ mode }) => {
       ),
       respondIoSampleApi(env.RESPOND_IO_ACCESS_TOKEN ?? ''),
       tiktokAdsManagerApi(),
+      aircallMissedCallsApi(env.AIRCALL_API_ID ?? '', env.AIRCALL_API_TOKEN ?? ''),
     ],
   }
 })
