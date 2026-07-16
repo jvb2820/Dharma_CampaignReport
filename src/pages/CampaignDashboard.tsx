@@ -414,6 +414,21 @@ function getBudgetTotals(report: BudgetResponse | null) {
   )
 }
 
+function getMonthKey(dateValue: string) {
+  return dateValue.slice(0, 7)
+}
+
+function getMonthLabel(monthKey: string) {
+  if (!monthKey) {
+    return 'No reports'
+  }
+
+  return new Date(`${monthKey}-01T00:00:00`).toLocaleDateString('en-US', {
+    month: 'long',
+    year: 'numeric',
+  })
+}
+
 function sumNullableCampaignMetric(
   campaigns: CampaignBudget[],
   metric: NullableCampaignMetric,
@@ -1113,6 +1128,7 @@ function App() {
   const [shouldShowRespondIoLogin, setShouldShowRespondIoLogin] = useState(false)
   const [fetchProgress, setFetchProgress] = useState<FetchProgressState>(emptyFetchProgress)
   const [deletingReportDate, setDeletingReportDate] = useState<string | null>(null)
+  const [selectedTableMonth, setSelectedTableMonth] = useState('')
   useLoadingTick(isLoading)
   useLoadingTick(respondIoReportLoadingPlatform !== null)
   useLoadingTick(fetchProgress.isRunning)
@@ -1207,10 +1223,42 @@ function App() {
 
     return Array.from(dates).sort()
   }, [metaReports, respondIoEntries, respondIoReportDate])
-  const averageMetaValue = useMemo(
-    () => getAverageMetaValue(respondIoEntries, respondIoSheetDates),
-    [respondIoEntries, respondIoSheetDates],
+  const tableMonths = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...metaReports.map((report) => getMonthKey(report.reportDate)),
+          ...respondIoSheetDates.map(getMonthKey),
+        ]),
+      )
+        .filter(Boolean)
+        .sort(),
+    [metaReports, respondIoSheetDates],
   )
+  const activeTableMonth = tableMonths.includes(selectedTableMonth)
+    ? selectedTableMonth
+    : (tableMonths.at(-1) ?? '')
+  const activeTableMonthIndex = tableMonths.indexOf(activeTableMonth)
+  const visibleRespondIoSheetDates = useMemo(
+    () => respondIoSheetDates.filter((date) => getMonthKey(date) === activeTableMonth),
+    [activeTableMonth, respondIoSheetDates],
+  )
+  const visibleSpanishReportRows = useMemo(
+    () => spanishReportRows.filter((row) => getMonthKey(row.reportDate) === activeTableMonth),
+    [activeTableMonth, spanishReportRows],
+  )
+  const averageMetaValue = useMemo(
+    () => getAverageMetaValue(respondIoEntries, visibleRespondIoSheetDates),
+    [respondIoEntries, visibleRespondIoSheetDates],
+  )
+
+  function changeTableMonth(offset: number) {
+    const nextMonth = tableMonths[activeTableMonthIndex + offset]
+
+    if (nextMonth) {
+      setSelectedTableMonth(nextMonth)
+    }
+  }
 
   useEffect(() => {
     setRespondIoEntries((currentEntries) => {
@@ -1849,7 +1897,25 @@ function App() {
             <h2>Respond Meta and TikTok</h2>
             <p>Fetch each platform for the selected day, then fill or adjust the sheet row.</p>
           </div>
-
+          <div className="month-pagination" aria-label="Respond report month">
+            <button
+              type="button"
+              onClick={() => changeTableMonth(-1)}
+              disabled={activeTableMonthIndex <= 0}
+              aria-label="Show previous month"
+            >
+              &lt;
+            </button>
+            <strong>{getMonthLabel(activeTableMonth)}</strong>
+            <button
+              type="button"
+              onClick={() => changeTableMonth(1)}
+              disabled={activeTableMonthIndex < 0 || activeTableMonthIndex >= tableMonths.length - 1}
+              aria-label="Show next month"
+            >
+              &gt;
+            </button>
+          </div>
         </div>
 
         {respondIoReportError ? (
@@ -1892,7 +1958,7 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {respondIoSheetDates.map((sheetDate) => {
+                  {visibleRespondIoSheetDates.map((sheetDate) => {
                     const entry = respondIoEntries[sheetDate] ?? emptyReportEntry
                     const totalsForEntry = getReportEntryTotals(entry)
 
@@ -1972,7 +2038,7 @@ function App() {
             <div className="row-delete-rail" aria-label="respond.io row actions">
               <span className="rail-caption-spacer" />
               <span className="rail-header-spacer" />
-              {respondIoSheetDates.map((sheetDate) => (
+              {visibleRespondIoSheetDates.map((sheetDate) => (
                 <span className="rail-row-action" key={sheetDate}>
                   <button
                     className="row-delete-button"
@@ -2052,7 +2118,28 @@ function App() {
                 : 'Fetch Meta budgets to populate the sheet.'}
             </p>
           </div>
-          {data ? <span>Fetched {new Date(data.fetchedAt).toLocaleString()}</span> : null}
+          <div className="table-heading-actions">
+            {data ? <span>Fetched {new Date(data.fetchedAt).toLocaleString()}</span> : null}
+            <div className="month-pagination" aria-label="Meta budget report month">
+              <button
+                type="button"
+                onClick={() => changeTableMonth(-1)}
+                disabled={activeTableMonthIndex <= 0}
+                aria-label="Show previous month"
+              >
+                &lt;
+              </button>
+              <strong>{getMonthLabel(activeTableMonth)}</strong>
+              <button
+                type="button"
+                onClick={() => changeTableMonth(1)}
+                disabled={activeTableMonthIndex < 0 || activeTableMonthIndex >= tableMonths.length - 1}
+                aria-label="Show next month"
+              >
+                &gt;
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="table-wrap">
@@ -2074,7 +2161,7 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {spanishReportRows.map((row) => (
+                  {visibleSpanishReportRows.map((row) => (
                     <tr key={row.reportDate}>
                       <td>{row.date}</td>
                       <td>{row.metaSpend}</td>
@@ -2129,7 +2216,7 @@ function App() {
             <div className="row-delete-rail" aria-label="Meta budget row actions">
               <span className="rail-caption-spacer" />
               <span className="rail-header-spacer" />
-              {spanishReportRows.map((row) => (
+              {visibleSpanishReportRows.map((row) => (
                 <span className="rail-row-action" key={row.reportDate}>
                   <button
                     className="row-delete-button"

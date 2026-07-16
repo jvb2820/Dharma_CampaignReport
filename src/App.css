@@ -1008,6 +1008,36 @@
   overflow: hidden;
 }
 
+.month-pagination {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.month-pagination strong {
+  min-width: 132px;
+  color: var(--text-h);
+  text-align: center;
+}
+
+.month-pagination button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(100, 126, 88, 0.24);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--text-h);
+  font-size: 18px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.month-pagination button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
 .table-with-actions {
   display: flex;
   align-items: stretch;
@@ -1361,6 +1391,12 @@
 
 .table-wrap {
   overflow: hidden;
+}
+
+.table-heading-actions {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
 }
 
 table {
