@@ -121,6 +121,29 @@ type AircallAssignee = {
   source: 'direct'
 }
 
+type HubSpotTask = {
+  id: string
+  properties: {
+    hs_createdate?: string | null
+    hs_task_contact_phone?: string | null
+    hs_task_status?: string | null
+    hs_task_subject?: string | null
+    hubspot_owner_id?: string | null
+  }
+}
+
+type HubSpotTaskSearchResponse = {
+  results?: HubSpotTask[]
+  paging?: { next?: { after?: string } }
+  message?: string
+}
+
+type HubSpotOwner = {
+  id: string
+  firstName?: string
+  lastName?: string
+}
+
 function facebookBudgetApi(token: string): Plugin {
   return {
     name: 'facebook-budget-api',
@@ -477,6 +500,81 @@ function aircallMissedCallsApi(apiId: string, apiToken: string): Plugin {
   }
 }
 
+function callConfirmationApi(hubSpotToken: string, apiId: string, apiToken: string): Plugin {
+  return {
+    name: 'call-confirmation-api',
+    configureServer(server) {
+      server.middlewares.use('/api/call-confirmation', async (request, response) => {
+        try {
+          if (!hubSpotToken || !apiId || !apiToken) {
+            sendJson(response, 500, {
+              message: 'Missing HUBSPOT_ACCESS_TOKEN or Aircall credentials in .env.local.',
+            })
+            return
+          }
+
+          const requestUrl = new URL(request.url ?? '', 'http://localhost')
+          const reportDate = requestUrl.searchParams.get('date') || getTodayInNewYork()
+          const { from, to } = getNewYorkUnixDayRange(reportDate)
+          const [tasks, outboundCalls, owners] = await Promise.all([
+            fetchHubSpotMissedCallTasks(reportDate, hubSpotToken),
+            fetchAircallCalls({ apiId, apiToken, from, to, phoneNumber: '', direction: 'outbound' }),
+            fetchHubSpotOwners(hubSpotToken),
+          ])
+          const ownerNames = new Map(
+            owners.map((owner) => [owner.id, `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim()]),
+          )
+          const uniqueTasks = Array.from(
+            new Map(
+              tasks
+                .map((task) => [normalizePhoneNumber(task.properties.hs_task_contact_phone), task] as const)
+                .filter(([phone]) => phone),
+            ).entries(),
+          )
+          const numbers = uniqueTasks.map(([phone, task]) => {
+            const assignedTo = ownerNames.get(task.properties.hubspot_owner_id ?? '') ?? 'Unassigned'
+            const matchingCalls = outboundCalls.filter((call) =>
+              phoneNumbersMatch(phone, normalizePhoneNumber(call.raw_digits)),
+            )
+            const matchingAssignedCalls = matchingCalls.filter((call) =>
+              namesMatch(getCallAssignee(call, 'direct')?.name ?? '', assignedTo),
+            )
+            const confirmedCalls = assignedTo === 'Unassigned' ? matchingCalls : matchingAssignedCalls
+
+            return {
+              phone,
+              assignedTo,
+              called: confirmedCalls.length > 0,
+              calledBy: Array.from(
+                new Set(
+                  confirmedCalls
+                    .map((call) => getCallAssignee(call, 'direct')?.name)
+                    .filter(Boolean),
+                ),
+              ),
+              callCount: confirmedCalls.length,
+            }
+          })
+          const notCalled = numbers.filter((number) => !number.called).length
+
+          sendJson(response, 200, {
+            reportDate,
+            timezone: 'America/New_York',
+            totalNumbers: numbers.length,
+            notCalled,
+            notCalledPercent: numbers.length ? Math.round((notCalled / numbers.length) * 10000) / 100 : 0,
+            numbers,
+          })
+        } catch (error) {
+          sendJson(response, 500, {
+            message: error instanceof Error ? error.message : 'Unable to build call confirmation.',
+          })
+        }
+      })
+    },
+  }
+}
+
 function getNodeScriptEnv() {
   return process.versions.electron
     ? { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
@@ -632,6 +730,105 @@ async function fetchAircallCallDetail(callId: number, apiId: string, apiToken: s
   const payload = await aircallGet<{ call?: AircallCall }>(url.toString(), apiId, apiToken)
 
   return payload.call ?? null
+}
+
+async function fetchHubSpotMissedCallTasks(reportDate: string, token: string) {
+  const { from, to } = getNewYorkUnixDayRange(reportDate)
+  const tasks: HubSpotTask[] = []
+  let after: string | undefined
+
+  do {
+    const response = await hubSpotPost<HubSpotTaskSearchResponse>(
+      '/crm/v3/objects/tasks/search',
+      {
+        filterGroups: [
+          {
+            filters: [
+              { propertyName: 'hs_createdate', operator: 'GTE', value: new Date(from * 1000).toISOString() },
+              { propertyName: 'hs_createdate', operator: 'LTE', value: new Date(to * 1000).toISOString() },
+            ],
+          },
+        ],
+        properties: [
+          'hs_createdate',
+          'hs_task_contact_phone',
+          'hs_task_status',
+          'hs_task_subject',
+          'hubspot_owner_id',
+        ],
+        limit: 200,
+        ...(after ? { after } : {}),
+      },
+      token,
+    )
+    tasks.push(...(response.results ?? []))
+    after = response.paging?.next?.after
+  } while (after)
+
+  return tasks.filter(
+    (task) => task.properties.hs_task_subject?.trim().toLowerCase() === 'missed calls',
+  )
+}
+
+async function fetchHubSpotOwners(token: string) {
+  const owners: HubSpotOwner[] = []
+  let after = ''
+
+  do {
+    const url = new URL('https://api.hubapi.com/crm/v3/owners')
+    url.searchParams.set('limit', '100')
+    url.searchParams.set('archived', 'false')
+    if (after) url.searchParams.set('after', after)
+    const payload = await hubSpotGet<{
+      results?: HubSpotOwner[]
+      paging?: { next?: { after?: string } }
+    }>(url.toString(), token)
+    owners.push(...(payload.results ?? []))
+    after = payload.paging?.next?.after ?? ''
+  } while (after)
+
+  return owners
+}
+
+async function hubSpotGet<T>(url: string, token: string): Promise<T> {
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  const payload = (await response.json().catch(() => ({}))) as T & { message?: string }
+
+  if (!response.ok) {
+    throw new Error(payload.message ?? `HubSpot API failed with ${response.status}.`)
+  }
+
+  return payload
+}
+
+async function hubSpotPost<T>(path: string, body: unknown, token: string): Promise<T> {
+  const response = await fetch(`https://api.hubapi.com${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const payload = (await response.json().catch(() => ({}))) as T & { message?: string }
+
+  if (!response.ok) {
+    throw new Error(payload.message ?? `HubSpot API failed with ${response.status}.`)
+  }
+
+  return payload
+}
+
+function normalizePhoneNumber(value?: string | null) {
+  return value?.replace(/\D/g, '') ?? ''
+}
+
+function phoneNumbersMatch(left: string, right: string) {
+  if (!left || !right) return false
+
+  const comparisonLength = Math.min(10, left.length, right.length)
+  return comparisonLength >= 7 && left.slice(-comparisonLength) === right.slice(-comparisonLength)
+}
+
+function namesMatch(left: string, right: string) {
+  return left.trim().toLowerCase() === right.trim().toLowerCase()
 }
 
 function getCallAssignee(
@@ -1036,6 +1233,11 @@ export default defineConfig(({ mode }) => {
       respondIoSampleApi(env.RESPOND_IO_ACCESS_TOKEN ?? ''),
       tiktokAdsManagerApi(),
       aircallMissedCallsApi(env.AIRCALL_API_ID ?? '', env.AIRCALL_API_TOKEN ?? ''),
+      callConfirmationApi(
+        env.HUBSPOT_ACCESS_TOKEN ?? '',
+        env.AIRCALL_API_ID ?? '',
+        env.AIRCALL_API_TOKEN ?? '',
+      ),
     ],
   }
 })

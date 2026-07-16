@@ -30,6 +30,22 @@ type MissedCallsResponse = {
   message?: string
 }
 
+type CallConfirmationResponse = {
+  reportDate: string
+  timezone: string
+  totalNumbers: number
+  notCalled: number
+  notCalledPercent: number
+  numbers: Array<{
+    phone: string
+    assignedTo: string
+    called: boolean
+    calledBy: string[]
+    callCount: number
+  }>
+  message?: string
+}
+
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 
 function getActiveApiBaseUrl() {
@@ -79,9 +95,18 @@ function formatDuration(seconds: number) {
 
 function MissedCalls() {
   const [selectedDate, setSelectedDate] = useState(getTodayInNewYork)
+  const [selectedDateDraft, setSelectedDateDraft] = useState(getTodayInNewYork)
+  const [missedCallsRequestId, setMissedCallsRequestId] = useState(0)
   const [calls, setCalls] = useState<MissedCall[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [confirmationDate, setConfirmationDate] = useState(getTodayInNewYork)
+  const [confirmationDateDraft, setConfirmationDateDraft] = useState(getTodayInNewYork)
+  const [confirmationRequestId, setConfirmationRequestId] = useState(0)
+  const [confirmation, setConfirmation] = useState<CallConfirmationResponse | null>(null)
+  const [isConfirmationLoading, setIsConfirmationLoading] = useState(false)
+  const [confirmationError, setConfirmationError] = useState('')
+  const [showNotCalled, setShowNotCalled] = useState(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -117,7 +142,52 @@ function MissedCalls() {
     loadMissedCalls()
 
     return () => controller.abort()
-  }, [selectedDate])
+  }, [selectedDate, missedCallsRequestId])
+
+  useEffect(() => {
+    const controller = new AbortController()
+
+    async function loadCallConfirmation() {
+      setIsConfirmationLoading(true)
+      setConfirmationError('')
+
+      try {
+        const params = new URLSearchParams({ date: confirmationDate })
+        const response = await fetch(getApiUrl(`/api/call-confirmation?${params.toString()}`), {
+          signal: controller.signal,
+        })
+        const payload = (await response.json()) as CallConfirmationResponse
+
+        if (!response.ok) {
+          throw new Error(payload.message ?? `Unable to confirm calls (${response.status}).`)
+        }
+
+        setConfirmation(payload)
+      } catch (fetchError) {
+        if (fetchError instanceof DOMException && fetchError.name === 'AbortError') return
+        setConfirmationError(
+          fetchError instanceof Error ? fetchError.message : 'Unable to confirm calls.',
+        )
+        setConfirmation(null)
+      } finally {
+        setIsConfirmationLoading(false)
+      }
+    }
+
+    loadCallConfirmation()
+    return () => controller.abort()
+  }, [confirmationDate, confirmationRequestId])
+
+  useEffect(() => {
+    if (!showNotCalled) return
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setShowNotCalled(false)
+    }
+
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [showNotCalled])
 
   const callCountLabel = useMemo(() => {
     if (isLoading) {
@@ -136,15 +206,35 @@ function MissedCalls() {
           <p>Review inbound calls that rang and were not answered by the user.</p>
         </div>
 
-        <label className="missed-calls-filter">
-          <span>Calendar</span>
-          <input
-            aria-label="Missed calls date"
-            onChange={(event) => setSelectedDate(event.target.value)}
-            type="date"
-            value={selectedDate}
-          />
-        </label>
+        <div className="missed-calls-controls">
+          <label className="missed-calls-filter">
+            <span>Calendar</span>
+            <input
+              aria-label="Missed calls date"
+              onChange={(event) => setSelectedDateDraft(event.target.value)}
+              type="date"
+              value={selectedDateDraft}
+            />
+          </label>
+          <button
+            className="call-confirmation-apply"
+            type="button"
+            onClick={() => {
+              setSelectedDate(selectedDateDraft)
+              setMissedCallsRequestId((requestId) => requestId + 1)
+            }}
+            disabled={isLoading || !selectedDateDraft}
+          >
+            {isLoading ? (
+              <>
+                <span className="report-loader-spinner" aria-hidden="true" />
+                Loading reports...
+              </>
+            ) : (
+              'Apply'
+            )}
+          </button>
+        </div>
       </section>
 
       <section className="missed-calls-results" aria-label="Missed calls results">
@@ -219,8 +309,149 @@ function MissedCalls() {
           })}
         </div>
       </section>
+
+      <section className="call-confirmation-report" aria-labelledby="call-confirmation-title">
+        <div className="call-confirmation-heading">
+          <div>
+            <p className="eyebrow">HubSpot + Aircall</p>
+            <h2 id="call-confirmation-title">Call Confirmation</h2>
+            <p>Confirms HubSpot "Missed calls" tasks against outbound Aircall calls.</p>
+          </div>
+          <div className="call-confirmation-controls">
+            <label className="missed-calls-filter">
+              <span>Confirmation day</span>
+              <input
+                aria-label="Call confirmation date"
+                onChange={(event) => setConfirmationDateDraft(event.target.value)}
+                type="date"
+                value={confirmationDateDraft}
+              />
+            </label>
+            <button
+              className="call-confirmation-apply"
+              type="button"
+              onClick={() => {
+                setShowNotCalled(false)
+                setConfirmationDate(confirmationDateDraft)
+                setConfirmationRequestId((requestId) => requestId + 1)
+              }}
+              disabled={isConfirmationLoading || !confirmationDateDraft}
+            >
+              {isConfirmationLoading ? (
+                <>
+                  <span className="report-loader-spinner" aria-hidden="true" />
+                  Loading reports...
+                </>
+              ) : (
+                'Apply'
+              )}
+            </button>
+          </div>
+        </div>
+
+        {confirmationError ? (
+          <div className="call-confirmation-message error">{confirmationError}</div>
+        ) : null}
+        {isConfirmationLoading ? (
+          <div className="call-confirmation-message loading" role="status" aria-live="polite">
+            <span className="report-loader-spinner" aria-hidden="true" />
+            <span>
+              <strong>Loading call confirmation</strong>
+              Checking HubSpot tasks and outbound Aircall calls...
+            </span>
+          </div>
+        ) : null}
+
+        {!isConfirmationLoading && confirmation ? (
+          <>
+            <div className="call-confirmation-table-wrap">
+              <table className="call-confirmation-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Total Numbers</th>
+                    <th>Not Called</th>
+                    <th>(%)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>{formatConfirmationDate(confirmation.reportDate)}</td>
+                    <td>{confirmation.totalNumbers}</td>
+                    <td>
+                      <button
+                        className="not-called-drilldown-button"
+                        type="button"
+                        onClick={() => setShowNotCalled((isVisible) => !isVisible)}
+                        aria-expanded={showNotCalled}
+                        aria-controls="not-called-number-list"
+                      >
+                        {confirmation.notCalled}
+                      </button>
+                    </td>
+                    <td>{confirmation.notCalledPercent}%</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            {showNotCalled ? (
+              <div
+                className="not-called-modal-backdrop"
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget) setShowNotCalled(false)
+                }}
+              >
+                <section
+                  className="not-called-drilldown"
+                  id="not-called-number-list"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="not-called-modal-title"
+                >
+                  <div className="not-called-drilldown-heading">
+                    <div>
+                      <strong id="not-called-modal-title">Numbers not called</strong>
+                      <span>{confirmation.notCalled} unmatched</span>
+                    </div>
+                    <button
+                      className="not-called-modal-close"
+                      type="button"
+                      onClick={() => setShowNotCalled(false)}
+                      aria-label="Close not called numbers"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  {confirmation.notCalled === 0 ? (
+                    <p>Every HubSpot missed-call task was confirmed in Aircall.</p>
+                  ) : (
+                    <ul>
+                      {confirmation.numbers
+                        .filter((number) => !number.called)
+                        .map((number) => (
+                          <li key={number.phone}>
+                            <a href={`tel:+${number.phone}`}>+{number.phone}</a>
+                            <span>Assigned to {number.assignedTo}</span>
+                          </li>
+                        ))}
+                    </ul>
+                  )}
+                </section>
+              </div>
+            ) : null}
+            <p className="call-confirmation-note">
+              HubSpot and Aircall are compared in {confirmation.timezone.replace('_', ' ')}.
+            </p>
+          </>
+        ) : null}
+      </section>
     </main>
   )
+}
+
+function formatConfirmationDate(value: string) {
+  const [, month, day] = value.split('-')
+  return `${Number(month)}/${Number(day)}`
 }
 
 export default MissedCalls
