@@ -14,6 +14,8 @@ const TARGET_CAMPAIGN_PATTERNS = [
   '{sp} smg campaign - 0123 v2 - secondary',
   '{sp} smg campaign - new ppl - 0123 v3',
 ]
+const CALL_CONFIRMATION_AGENTS = ['William Carcamo', 'Kathering Silva']
+const BUSINESS_HOURS_END = 19
 
 type GraphCampaign = {
   id: string
@@ -554,55 +556,85 @@ function callConfirmationApi(hubSpotToken: string, apiId: string, apiToken: stri
 
           const requestUrl = new URL(request.url ?? '', 'http://localhost')
           const reportDate = requestUrl.searchParams.get('date') || getTodayInNewYork()
+          const previousReportDate = shiftIsoDate(reportDate, -1)
           const { from, to } = getNewYorkUnixDayRange(reportDate)
-          const [tasks, outboundCalls, owners] = await Promise.all([
+          const [tasks, previousTasks, outboundCalls, owners] = await Promise.all([
             fetchHubSpotMissedCallTasks(reportDate, hubSpotToken),
+            fetchHubSpotMissedCallTasks(previousReportDate, hubSpotToken),
             fetchAircallCalls({ apiId, apiToken, from, to, phoneNumber: '', direction: 'outbound' }),
             fetchHubSpotOwners(hubSpotToken),
           ])
           const ownerNames = new Map(
             owners.map((owner) => [owner.id, `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim()]),
           )
-          const uniqueTasks = Array.from(
-            new Map(
-              tasks
+          const buildConfirmationNumbers = (sourceTasks: HubSpotTask[]) => {
+            const uniqueTasks = Array.from(
+              new Map(
+                sourceTasks
                 .map((task) => [normalizePhoneNumber(task.properties.hs_task_contact_phone), task] as const)
                 .filter(([phone]) => phone),
-            ).entries(),
-          )
-          const numbers = uniqueTasks.map(([phone, task]) => {
-            const assignedTo = ownerNames.get(task.properties.hubspot_owner_id ?? '') ?? 'Unassigned'
-            const matchingCalls = outboundCalls.filter((call) =>
-              phoneNumbersMatch(phone, normalizePhoneNumber(call.raw_digits)),
+              ).entries(),
             )
-            const matchingAssignedCalls = matchingCalls.filter((call) =>
-              namesMatch(getCallAssignee(call, 'direct')?.name ?? '', assignedTo),
-            )
-            const confirmedCalls = assignedTo === 'Unassigned' ? matchingCalls : matchingAssignedCalls
+            return uniqueTasks.map(([phone, task]) => {
+              const assignedTo = ownerNames.get(task.properties.hubspot_owner_id ?? '') ?? 'Unassigned'
+              const confirmedCalls = outboundCalls.filter((call) => {
+                const agentName = getCallAssignee(call, 'direct')?.name ?? ''
+                return (
+                  phoneNumbersMatch(phone, normalizePhoneNumber(call.raw_digits)) &&
+                  CALL_CONFIRMATION_AGENTS.some((allowedAgent) =>
+                    namesMatch(agentName, allowedAgent),
+                  )
+                )
+              })
+
+              return {
+                phone,
+                assignedTo,
+                called: confirmedCalls.length > 0,
+                calledBy: Array.from(
+                  new Set(
+                    confirmedCalls
+                      .map((call) => getCallAssignee(call, 'direct')?.name)
+                      .filter(Boolean),
+                  ),
+                ),
+                callCount: confirmedCalls.length,
+              }
+            })
+          }
+          const makeRow = (date: string, outsideBusinessHours: boolean, rowTasks: HubSpotTask[]) => {
+            const numbers = buildConfirmationNumbers(rowTasks)
+            const notCalled = numbers.filter((number) => !number.called).length
 
             return {
-              phone,
-              assignedTo,
-              called: confirmedCalls.length > 0,
-              calledBy: Array.from(
-                new Set(
-                  confirmedCalls
-                    .map((call) => getCallAssignee(call, 'direct')?.name)
-                    .filter(Boolean),
-                ),
-              ),
-              callCount: confirmedCalls.length,
+              reportDate: date,
+              outsideBusinessHours,
+              totalNumbers: numbers.length,
+              notCalled,
+              notCalledPercent: numbers.length
+                ? Math.round((notCalled / numbers.length) * 10000) / 100
+                : 0,
+              numbers,
             }
-          })
-          const notCalled = numbers.filter((number) => !number.called).length
+          }
+          const previousOutsideHoursTasks = previousTasks.filter(isOutsideBusinessHoursTask)
+          const currentBusinessHoursTasks = tasks.filter((task) => !isOutsideBusinessHoursTask(task))
+          const rows = [
+            ...(previousOutsideHoursTasks.length
+              ? [makeRow(previousReportDate, true, previousOutsideHoursTasks)]
+              : []),
+            makeRow(reportDate, false, currentBusinessHoursTasks),
+          ]
+          const currentRow = rows.at(-1)!
 
           sendJson(response, 200, {
             reportDate,
             timezone: 'America/New_York',
-            totalNumbers: numbers.length,
-            notCalled,
-            notCalledPercent: numbers.length ? Math.round((notCalled / numbers.length) * 10000) / 100 : 0,
-            numbers,
+            totalNumbers: currentRow.totalNumbers,
+            notCalled: currentRow.notCalled,
+            notCalledPercent: currentRow.notCalledPercent,
+            numbers: currentRow.numbers,
+            rows,
           })
         } catch (error) {
           sendJson(response, 500, {
@@ -888,6 +920,27 @@ function phoneNumbersMatch(left: string, right: string) {
 
 function namesMatch(left: string, right: string) {
   return left.trim().toLowerCase() === right.trim().toLowerCase()
+}
+
+function isOutsideBusinessHoursTask(task: HubSpotTask) {
+  const createdAt = task.properties.hs_createdate
+  if (!createdAt) return false
+
+  const hour = Number(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      hour: '2-digit',
+      hourCycle: 'h23',
+    }).format(new Date(createdAt)),
+  )
+
+  return hour >= BUSINESS_HOURS_END
+}
+
+function shiftIsoDate(value: string, days: number) {
+  const date = new Date(`${value}T12:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
 }
 
 function isAgentBusyDuringCall(

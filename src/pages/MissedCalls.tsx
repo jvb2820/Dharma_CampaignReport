@@ -43,6 +43,14 @@ type CallConfirmationResponse = {
     calledBy: string[]
     callCount: number
   }>
+  rows?: Array<{
+    reportDate: string
+    outsideBusinessHours: boolean
+    totalNumbers: number
+    notCalled: number
+    notCalledPercent: number
+    numbers: CallConfirmationResponse['numbers']
+  }>
   message?: string
 }
 
@@ -106,7 +114,7 @@ function MissedCalls() {
   const [confirmation, setConfirmation] = useState<CallConfirmationResponse | null>(null)
   const [isConfirmationLoading, setIsConfirmationLoading] = useState(false)
   const [confirmationError, setConfirmationError] = useState('')
-  const [showNotCalled, setShowNotCalled] = useState(false)
+  const [notCalledRowIndex, setNotCalledRowIndex] = useState<number | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -179,15 +187,15 @@ function MissedCalls() {
   }, [confirmationDate, confirmationRequestId])
 
   useEffect(() => {
-    if (!showNotCalled) return
+    if (notCalledRowIndex === null) return
 
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') setShowNotCalled(false)
+      if (event.key === 'Escape') setNotCalledRowIndex(null)
     }
 
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [showNotCalled])
+  }, [notCalledRowIndex])
 
   const callCountLabel = useMemo(() => {
     if (isLoading) {
@@ -196,6 +204,22 @@ function MissedCalls() {
 
     return `${calls.length} ${calls.length === 1 ? 'call' : 'calls'}`
   }, [calls.length, isLoading])
+  const confirmationRows =
+    confirmation?.rows ??
+    (confirmation
+      ? [
+          {
+            reportDate: confirmation.reportDate,
+            outsideBusinessHours: false,
+            totalNumbers: confirmation.totalNumbers,
+            notCalled: confirmation.notCalled,
+            notCalledPercent: confirmation.notCalledPercent,
+            numbers: confirmation.numbers,
+          },
+        ]
+      : [])
+  const selectedConfirmationRow =
+    notCalledRowIndex === null ? null : confirmationRows[notCalledRowIndex] ?? null
 
   return (
     <main className="dashboard-shell missed-calls-page">
@@ -331,7 +355,7 @@ function MissedCalls() {
               className="call-confirmation-apply"
               type="button"
               onClick={() => {
-                setShowNotCalled(false)
+                setNotCalledRowIndex(null)
                 setConfirmationDate(confirmationDateDraft)
                 setConfirmationRequestId((requestId) => requestId + 1)
               }}
@@ -375,30 +399,39 @@ function MissedCalls() {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td>{formatConfirmationDate(confirmation.reportDate)}</td>
-                    <td>{confirmation.totalNumbers}</td>
-                    <td>
-                      <button
-                        className="not-called-drilldown-button"
-                        type="button"
-                        onClick={() => setShowNotCalled((isVisible) => !isVisible)}
-                        aria-expanded={showNotCalled}
-                        aria-controls="not-called-number-list"
-                      >
-                        {confirmation.notCalled}
-                      </button>
-                    </td>
-                    <td>{confirmation.notCalledPercent}%</td>
-                  </tr>
+                  {confirmationRows.map((row, rowIndex) => (
+                    <tr key={`${row.reportDate}-${row.outsideBusinessHours ? 'outside' : 'regular'}`}>
+                      <td>
+                        {formatConfirmationDate(row.reportDate)}
+                        {row.outsideBusinessHours ? '*' : ''}
+                      </td>
+                      <td>{row.totalNumbers}</td>
+                      <td>
+                        <button
+                          className="not-called-drilldown-button"
+                          type="button"
+                          onClick={() =>
+                            setNotCalledRowIndex((currentIndex) =>
+                              currentIndex === rowIndex ? null : rowIndex,
+                            )
+                          }
+                          aria-expanded={notCalledRowIndex === rowIndex}
+                          aria-controls="not-called-number-list"
+                        >
+                          {row.notCalled}
+                        </button>
+                      </td>
+                      <td>{row.notCalledPercent}%</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
-            {showNotCalled ? (
+            {selectedConfirmationRow ? (
               <div
                 className="not-called-modal-backdrop"
                 onMouseDown={(event) => {
-                  if (event.target === event.currentTarget) setShowNotCalled(false)
+                  if (event.target === event.currentTarget) setNotCalledRowIndex(null)
                 }}
               >
                 <section
@@ -411,22 +444,22 @@ function MissedCalls() {
                   <div className="not-called-drilldown-heading">
                     <div>
                       <strong id="not-called-modal-title">Numbers not called</strong>
-                      <span>{confirmation.notCalled} unmatched</span>
+                      <span>{selectedConfirmationRow.notCalled} unmatched</span>
                     </div>
                     <button
                       className="not-called-modal-close"
                       type="button"
-                      onClick={() => setShowNotCalled(false)}
+                      onClick={() => setNotCalledRowIndex(null)}
                       aria-label="Close not called numbers"
                     >
                       ×
                     </button>
                   </div>
-                  {confirmation.notCalled === 0 ? (
+                  {selectedConfirmationRow.notCalled === 0 ? (
                     <p>Every HubSpot missed-call task was confirmed in Aircall.</p>
                   ) : (
                     <ul>
-                      {confirmation.numbers
+                      {selectedConfirmationRow.numbers
                         .filter((number) => !number.called)
                         .map((number) => (
                           <li key={number.phone}>
@@ -440,7 +473,8 @@ function MissedCalls() {
               </div>
             ) : null}
             <p className="call-confirmation-note">
-              HubSpot and Aircall are compared in {confirmation.timezone.replace('_', ' ')}.
+              * Previous-day calls received at or after 7:00 PM. HubSpot and Aircall are
+              compared in {confirmation.timezone.replace('_', ' ')}.
             </p>
           </>
         ) : null}
