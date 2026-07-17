@@ -68,6 +68,7 @@ type RespondIoAnalyticsResponse = {
 }
 
 type AircallUser = {
+  id?: number
   name?: string
   email?: string
 }
@@ -470,8 +471,8 @@ function aircallMissedCallsApi(apiId: string, apiToken: string): Plugin {
               aircallNumberName: enrichedCall.number?.name ?? '',
               aircallNumberDigits: enrichedCall.number?.digits ?? '',
               missedByName:
-                getTimelineMissedByName(enrichedCall.id) ??
                 inferMissedByFromRouteTiming(enrichedCall) ??
+                getVerifiedMissedByName(enrichedCall.id) ??
                 assignee?.name ??
                 null,
               assigneeName: assignee?.name ?? null,
@@ -484,11 +485,49 @@ function aircallMissedCallsApi(apiId: string, apiToken: string): Plugin {
               archived: enrichedCall.archived,
             }
           }))
+          const missedByNames = [
+            ...new Set(missedCalls.map((call) => call.missedByName).filter(Boolean)),
+          ] as string[]
+          const users = missedByNames.length
+            ? await fetchAircallUsers(apiId, apiToken)
+            : []
+          const agentCalls = (
+            await Promise.all(
+              missedByNames.map((agentName) => {
+                const user = users.find(
+                  (candidate) => candidate.name && namesMatch(candidate.name, agentName),
+                )
+
+                return user?.id
+                  ? fetchAircallCalls({
+                      apiId,
+                      apiToken,
+                      from,
+                      to,
+                      phoneNumber: '',
+                      direction: null,
+                      userId: user.id,
+                    })
+                  : Promise.resolve([])
+              }),
+            )
+          ).flat()
+          const availableMissedCalls = missedCalls.filter(
+            (call) =>
+              !call.missedByName ||
+              !isAgentBusyDuringCall(
+                call.missedByName,
+                call.id,
+                call.startedAt,
+                call.endedAt,
+                agentCalls,
+              ),
+          )
 
           sendJson(response, 200, {
             reportDate,
             timezone: 'America/New_York',
-            calls: missedCalls,
+            calls: availableMissedCalls,
           })
         } catch (error) {
           sendJson(response, 500, {
@@ -687,6 +726,7 @@ async function fetchAircallCalls({
   to,
   phoneNumber,
   direction = 'inbound',
+  userId,
 }: {
   apiId: string
   apiToken: string
@@ -694,6 +734,7 @@ async function fetchAircallCalls({
   to: number
   phoneNumber: string
   direction?: 'inbound' | 'outbound' | null
+  userId?: number
 }) {
   const url = new URL('https://api.aircall.io/v1/calls/search')
   url.searchParams.set('from', String(from))
@@ -709,6 +750,10 @@ async function fetchAircallCalls({
     url.searchParams.set('phone_number', phoneNumber)
   }
 
+  if (userId) {
+    url.searchParams.set('user_id', String(userId))
+  }
+
   const calls: AircallCall[] = []
   let nextUrl: string | null = url.toString()
 
@@ -720,6 +765,20 @@ async function fetchAircallCalls({
   }
 
   return calls
+}
+
+async function fetchAircallUsers(apiId: string, apiToken: string) {
+  const users: AircallUser[] = []
+  let nextUrl: string | null = 'https://api.aircall.io/v1/users?per_page=100'
+
+  while (nextUrl) {
+    const payload: { users?: AircallUser[]; meta?: { next_page_link?: string | null } } =
+      await aircallGet(nextUrl, apiId, apiToken)
+    users.push(...(payload.users ?? []))
+    nextUrl = payload.meta?.next_page_link ?? null
+  }
+
+  return users
 }
 
 async function fetchAircallCallDetail(callId: number, apiId: string, apiToken: string) {
@@ -831,6 +890,27 @@ function namesMatch(left: string, right: string) {
   return left.trim().toLowerCase() === right.trim().toLowerCase()
 }
 
+function isAgentBusyDuringCall(
+  agentName: string,
+  missedCallId: number,
+  missedCallStartedAt: string,
+  missedCallEndedAt: string,
+  calls: AircallCall[],
+) {
+  const missedCallStart = Date.parse(missedCallStartedAt) / 1000
+  const missedCallEnd = Date.parse(missedCallEndedAt) / 1000
+
+  return calls.some((call) => {
+    if (call.id === missedCallId || !call.user?.name || !namesMatch(call.user.name, agentName)) {
+      return false
+    }
+
+    // Aircall assigns the user field to the agent making or answering a call.
+    // Any overlap means that agent was occupied during this missed call.
+    return call.started_at < missedCallEnd && call.ended_at > missedCallStart
+  })
+}
+
 function getCallAssignee(
   call: AircallCall,
   source: AircallAssignee['source'],
@@ -848,13 +928,15 @@ function getCallAssignee(
   }
 }
 
-function getTimelineMissedByName(callId: number) {
-  const timelineMissedBy: Record<number, string> = {
+function getVerifiedMissedByName(callId: number) {
+  // Aircall's public call timeline omits agent ring attempts. Keep dashboard-verified
+  // attempts here as a fallback when route timing is unavailable in the API response.
+  const verifiedMissedBy: Record<number, string> = {
     3957724828: 'William Carcamo',
     3958681499: 'Kevin Tinjaca',
   }
 
-  return timelineMissedBy[callId] ?? null
+  return verifiedMissedBy[callId] ?? null
 }
 
 function inferMissedByFromRouteTiming(call: AircallCall) {
@@ -882,7 +964,10 @@ function inferMissedByFromRouteTiming(call: AircallCall) {
     return 'William Carcamo'
   }
 
-  if (secondsAfterIvr <= 38) {
+  // Aircall's IVR transition timestamp precedes the dashboard's first agent-routing
+  // event by roughly nine seconds. Kevin's >1 second ring therefore ends no later
+  // than 47 seconds after the API transition, not 38 seconds.
+  if (secondsAfterIvr <= 47) {
     return 'Kevin Tinjaca'
   }
 
@@ -894,13 +979,21 @@ function normalizeRouteValue(value?: string) {
 }
 
 function getSelectedIvrLabel(selectedIvr?: AircallIvrOption) {
+  const title = normalizeRouteValue(selectedIvr?.title)
+
+  // Aircall can return a stale/mismatched internal branch name. The title is the
+  // customer-facing IVR option that was actually selected (for example, Spanish).
+  if (title) {
+    return title
+  }
+
   const branch = normalizeRouteValue(selectedIvr?.branch)
 
   if (branch && !branch.startsWith('t(')) {
     return branch
   }
 
-  return normalizeRouteValue(selectedIvr?.title)
+  return ''
 }
 
 async function aircallGet<T>(url: string, apiId: string, apiToken: string): Promise<T> {
