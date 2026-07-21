@@ -473,8 +473,8 @@ function MissedCalls() {
               </div>
             ) : null}
             <p className="call-confirmation-note">
-              * Previous-day calls received at or after 7:00 PM. HubSpot and Aircall are
-              compared in {confirmation.timezone.replace('_', ' ')}.
+              * Previous-day calls received on Saturday or at or after 7:00 PM. HubSpot and
+              Aircall are compared in {confirmation.timezone.replace('_', ' ')}.
             </p>
           </>
         ) : null}

@@ -926,15 +926,16 @@ function isOutsideBusinessHoursTask(task: HubSpotTask) {
   const createdAt = task.properties.hs_createdate
   if (!createdAt) return false
 
-  const hour = Number(
-    new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/New_York',
-      hour: '2-digit',
-      hourCycle: 'h23',
-    }).format(new Date(createdAt)),
-  )
+  const newYorkParts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'short',
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(createdAt))
+  const weekday = newYorkParts.find((part) => part.type === 'weekday')?.value
+  const hour = Number(newYorkParts.find((part) => part.type === 'hour')?.value)
 
-  return hour >= BUSINESS_HOURS_END
+  return weekday === 'Sat' || hour >= BUSINESS_HOURS_END
 }
 
 function shiftIsoDate(value: string, days: number) {
