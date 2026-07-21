@@ -473,8 +473,8 @@ function aircallMissedCallsApi(apiId: string, apiToken: string): Plugin {
               aircallNumberName: enrichedCall.number?.name ?? '',
               aircallNumberDigits: enrichedCall.number?.digits ?? '',
               missedByName:
-                inferMissedByFromRouteTiming(enrichedCall) ??
                 getVerifiedMissedByName(enrichedCall.id) ??
+                inferMissedByFromRouteTiming(enrichedCall) ??
                 assignee?.name ??
                 null,
               assigneeName: assignee?.name ?? null,
@@ -987,6 +987,7 @@ function getVerifiedMissedByName(callId: number) {
   const verifiedMissedBy: Record<number, string> = {
     3957724828: 'William Carcamo',
     3958681499: 'Kevin Tinjaca',
+    3976084348: 'Kevin Tinjaca',
   }
 
   return verifiedMissedBy[callId] ?? null
