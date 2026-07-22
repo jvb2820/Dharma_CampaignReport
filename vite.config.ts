@@ -16,6 +16,26 @@ const TARGET_CAMPAIGN_PATTERNS = [
 ]
 const CALL_CONFIRMATION_AGENTS = ['William Carcamo', 'Kathering Silva']
 const BUSINESS_HOURS_END = 19
+const RESPOND_IO_ORGANIZATION_ID = '236383'
+const RESPOND_IO_SPACE_ID = '238284'
+const AGENT_REPORT_AGENTS = [
+  { name: 'Ailene Nuevas', aliases: ['Ailene Nuevas'] },
+  { name: 'Diana Villalobos', aliases: ['Diana Villalobos'] },
+  { name: 'Laura Sanchez', aliases: ['Laura Sanchez', 'Laura Alejandra Sanchez Pinto'] },
+  { name: 'Natasha Lopez', aliases: ['Natasha Lopez'] },
+  { name: 'William Carcamo', aliases: ['William Carcamo'] },
+  { name: 'Kathering Silva', aliases: ['Kathering Silva'] },
+  { name: 'Kevin Tinjaca', aliases: ['Kevin Tinjaca'] },
+]
+const STAFF_PERFORMANCE_REPORT = [
+  { name: 'Carol Fernandes', respondAliases: ['Carol Fernandes'], hasCalls: false },
+  { name: 'Ailene Nuevas', respondAliases: ['Ailene Nuevas'], hasCalls: true },
+  { name: 'Diana Villalobos', respondAliases: ['Diana Villalobos'], hasCalls: true },
+  { name: 'Laura Sanchez', respondAliases: ['Laura Sanchez'], hasCalls: true },
+  { name: 'Natasha Lopez', respondAliases: ['Natasha Lopez'], hasCalls: true },
+  { name: 'Natasha Lorente', respondAliases: ['Natasha Lorente'], hasCalls: false },
+  { name: 'William Carcamo', respondAliases: ['William Carcamo'], hasCalls: true },
+]
 // The Public Calls API marks these as missed, but dashboard review confirmed that
 // an agent attempted to answer after the caller had already disconnected.
 const EXCLUDED_MISSED_CALL_IDS = new Set([3979734082])
@@ -70,6 +90,18 @@ type RespondIoAnalyticsResponse = {
   opened?: { count?: number }
   values?: Record<string, unknown>
   [key: string]: unknown
+}
+
+type RespondIoUser = {
+  id: number
+  firstName?: string
+  lastName?: string
+}
+
+type RespondIoUserPerformanceResponse = {
+  data?: {
+    data?: Array<{ userId: number; outgoingMessageCount?: number }>
+  }
 }
 
 type AircallUser = {
@@ -754,6 +786,181 @@ function callConfirmationApi(hubSpotToken: string, apiId: string, apiToken: stri
   }
 }
 
+function agentReportApi(
+  apiId: string,
+  apiToken: string,
+  respondIoToken: string,
+  respondIoAnalyticsToken: string,
+): Plugin {
+  return {
+    name: 'aircall-agent-report-api',
+    configureServer(server) {
+      server.middlewares.use('/api/agent-report', async (request, response) => {
+        try {
+          if (!apiId || !apiToken) {
+            sendJson(response, 500, { message: 'Missing Aircall credentials.' })
+            return
+          }
+
+          const requestUrl = new URL(request.url ?? '', 'http://localhost')
+          const reportDate = requestUrl.searchParams.get('date') || getTodayInNewYork()
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) {
+            sendJson(response, 400, { message: 'Date must use YYYY-MM-DD.' })
+            return
+          }
+
+          const { from, to } = getNewYorkUnixDayRange(reportDate)
+          const [calls, users] = await Promise.all([
+            fetchAircallCalls({ apiId, apiToken, from, to, phoneNumber: '', direction: null }),
+            fetchAircallUsers(apiId, apiToken),
+          ])
+          const agents = AGENT_REPORT_AGENTS.map(({ name, aliases }) => {
+            const matchingUsers = users.filter(
+              (candidate) =>
+                candidate.name && aliases.some((alias) => namesMatch(candidate.name!, alias)),
+            )
+            const matchingUserIds = new Set(
+              matchingUsers.map((candidate) => candidate.id).filter(Boolean),
+            )
+            const agentCalls = calls.filter((call) => {
+              if (call.user?.id && matchingUserIds.has(call.user.id)) return true
+              return Boolean(
+                call.user?.name && aliases.some((alias) => namesMatch(call.user!.name!, alias)),
+              )
+            })
+            const inbound = agentCalls.filter((call) => call.direction === 'inbound').length
+            const outbound = agentCalls.filter((call) => call.direction === 'outbound').length
+            const callLengthSeconds = agentCalls.reduce((total, call) => {
+              if (!call.answered_at) return total
+              return total + Math.max(0, call.ended_at - call.answered_at)
+            }, 0)
+
+            return {
+              id: matchingUsers[0]?.id ?? null,
+              name,
+              callLengthSeconds,
+              inbound,
+              outbound,
+              totalCalls: inbound + outbound,
+            }
+          })
+          const respondMessages = await fetchRespondStaffMessages(
+            reportDate,
+            respondIoToken,
+            respondIoAnalyticsToken,
+          ).catch(() => null)
+          const staff = STAFF_PERFORMANCE_REPORT.map(({ name, respondAliases, hasCalls }) => {
+            const agent = agents.find((candidate) => namesMatch(candidate.name, name))
+            const matchingAircallConfig = AGENT_REPORT_AGENTS.find((candidate) =>
+              namesMatch(candidate.name, name),
+            )
+            const matchingUserIds = new Set(
+              users
+                .filter(
+                  (user) =>
+                    user.id &&
+                    matchingAircallConfig?.aliases.some(
+                      (alias) => user.name && namesMatch(user.name, alias),
+                    ),
+                )
+                .map((user) => user.id!),
+            )
+            const matchingCalls = calls.filter(
+              (call) => call.user?.id && matchingUserIds.has(call.user.id),
+            )
+            const connectedOver30Seconds = matchingCalls.filter(
+              (call) =>
+                call.direction === 'outbound' &&
+                call.answered_at !== null &&
+                call.ended_at - call.answered_at > 30,
+            ).length
+
+            return {
+              name,
+              messages: respondMessages
+                ? respondAliases.reduce(
+                    (count, alias) => count + (respondMessages.get(alias.toLowerCase()) ?? 0),
+                    0,
+                  )
+                : null,
+              calls: hasCalls ? (agent?.outbound ?? 0) : null,
+              connectedOver30Seconds: hasCalls ? connectedOver30Seconds : null,
+              bookingsByMessages: null,
+              bookingsByCall: null,
+              totalBookings: null,
+            }
+          })
+
+          sendJson(response, 200, {
+            reportDate,
+            timezone: 'America/New_York',
+            agents,
+            totals: {
+              callLengthSeconds: agents.reduce((sum, agent) => sum + agent.callLengthSeconds, 0),
+              inbound: agents.reduce((sum, agent) => sum + agent.inbound, 0),
+              outbound: agents.reduce((sum, agent) => sum + agent.outbound, 0),
+              totalCalls: agents.reduce((sum, agent) => sum + agent.totalCalls, 0),
+            },
+            staff,
+            staffTotals: {
+              messages: staff.reduce((sum, row) => sum + (row.messages ?? 0), 0),
+              calls: staff.reduce((sum, row) => sum + (row.calls ?? 0), 0),
+              connectedOver30Seconds: staff.reduce(
+                (sum, row) => sum + (row.connectedOver30Seconds ?? 0),
+                0,
+              ),
+              bookingsByMessages: null,
+              bookingsByCall: null,
+              totalBookings: null,
+            },
+            respondIoAvailable: respondMessages !== null,
+          })
+        } catch (error) {
+          sendJson(response, 500, {
+            message: error instanceof Error ? error.message : 'Unable to build agent report.',
+          })
+        }
+      })
+    },
+  }
+}
+
+async function fetchRespondStaffMessages(
+  reportDate: string,
+  apiToken: string,
+  analyticsToken: string,
+) {
+  if (!apiToken || !analyticsToken) throw new Error('respond.io reporting is not configured.')
+  const [userPayload, performance] = await Promise.all([
+    respondIoGet<{ items?: RespondIoUser[] }>('space/user', apiToken, { limit: '100' }),
+    respondIoAnalyticsPost<RespondIoUserPerformanceResponse>(
+      'user/performance',
+      {
+        date: getNewYorkDateRange(reportDate),
+        pagination: {
+          page: 1,
+          itemsPerPage: 100,
+          sortBy: ['closedCount'],
+          sortDesc: [true],
+        },
+      },
+      analyticsToken,
+    ),
+  ])
+  const usersById = new Map(
+    (userPayload.items ?? []).map((user) => [
+      user.id,
+      `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
+    ]),
+  )
+  const messages = new Map<string, number>()
+  for (const row of performance.data?.data ?? []) {
+    const name = usersById.get(row.userId)
+    if (name) messages.set(name.toLowerCase(), row.outgoingMessageCount ?? 0)
+  }
+  return messages
+}
+
 function getNodeScriptEnv() {
   return process.versions.electron
     ? { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
@@ -1247,6 +1454,9 @@ async function respondIoAnalyticsPost<T>(path: string, body: unknown, token: str
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
+      orgid: RESPOND_IO_ORGANIZATION_ID,
+      botid: RESPOND_IO_SPACE_ID,
+      timezone: 'America/New_York',
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
@@ -1513,6 +1723,12 @@ export default defineConfig(({ mode }) => {
         env.AIRCALL_API_TOKEN ?? '',
         env.VITE_SUPABASE_URL ?? '',
         env.SUPABASE_SERVICE_ROLE_KEY ?? '',
+      ),
+      agentReportApi(
+        env.AIRCALL_API_ID ?? '',
+        env.AIRCALL_API_TOKEN ?? '',
+        env.RESPOND_IO_ACCESS_TOKEN ?? '',
+        env.RESPOND_IO_ANALYTICS_ACCESS_TOKEN ?? '',
       ),
       callConfirmationApi(
         env.HUBSPOT_ACCESS_TOKEN ?? '',
