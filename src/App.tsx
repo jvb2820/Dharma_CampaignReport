@@ -1,4 +1,5 @@
 import './App.css'
+import AgentReport from './pages/AgentReport'
 import CampaignDashboard from './pages/CampaignDashboard'
 import MissedCalls from './pages/MissedCalls'
 
@@ -10,6 +11,7 @@ type AppRoute = {
 const routes: AppRoute[] = [
   { path: '/campaign', label: 'Campaign' },
   { path: '/missed-calls', label: 'Missed Calls' },
+  { path: '/agent-report', label: 'Agent Report' },
 ]
 
 function getActiveRoute() {
@@ -19,8 +21,8 @@ function getActiveRoute() {
     return '/campaign'
   }
 
-  if (pathname === '/missed-calls') {
-    return '/missed-calls'
+  if (routes.some((route) => route.path === pathname)) {
+    return pathname
   }
 
   return '/campaign'
@@ -51,7 +53,13 @@ function App() {
         </div>
       </nav>
 
-      {activeRoute === '/missed-calls' ? <MissedCalls /> : <CampaignDashboard />}
+      {activeRoute === '/missed-calls' ? (
+        <MissedCalls />
+      ) : activeRoute === '/agent-report' ? (
+        <AgentReport />
+      ) : (
+        <CampaignDashboard />
+      )}
     </>
   )
 }
