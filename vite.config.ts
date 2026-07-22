@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import { openSync } from 'node:fs'
-import type { ServerResponse } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
@@ -125,6 +125,20 @@ type AircallAssignee = {
   name: string
   email: string | null
   source: 'direct'
+}
+
+type AircallWebhookPayload = {
+  event?: string
+  resource?: string
+  timestamp?: number
+  token?: string
+  data?: AircallCall
+}
+
+type StoredAircallRingEvent = {
+  call_id: number
+  agent_name: string | null
+  event_timestamp: number
 }
 
 type HubSpotTask = {
@@ -417,7 +431,12 @@ async function runRespondIoSessionReport(reportDate: string, platform: string) {
   }
 }
 
-function aircallMissedCallsApi(apiId: string, apiToken: string): Plugin {
+function aircallMissedCallsApi(
+  apiId: string,
+  apiToken: string,
+  supabaseUrl: string,
+  supabaseServiceRoleKey: string,
+): Plugin {
   return {
     name: 'aircall-missed-calls-api',
     configureServer(server) {
@@ -448,6 +467,11 @@ function aircallMissedCallsApi(apiId: string, apiToken: string): Plugin {
             .filter((call) =>
               clientNumber ? call.raw_digits.replace(/\D/g, '') === clientNumber : true,
             )
+          const lastRungAgents = await fetchLastRungAgents(
+            missedCallRows.map((call) => call.id),
+            supabaseUrl,
+            supabaseServiceRoleKey,
+          ).catch(() => new Map<number, string>())
           const missedCalls = await Promise.all(missedCallRows.map(async (call) => {
             const detailedCall = (await fetchAircallCallDetail(call.id, apiId, apiToken)
               .catch(() => call)
@@ -477,6 +501,7 @@ function aircallMissedCallsApi(apiId: string, apiToken: string): Plugin {
               aircallNumberName: enrichedCall.number?.name ?? '',
               aircallNumberDigits: enrichedCall.number?.digits ?? '',
               missedByName:
+                lastRungAgents.get(enrichedCall.id) ??
                 getVerifiedMissedByName(enrichedCall.id) ??
                 assignee?.name ??
                 null,
@@ -537,6 +562,86 @@ function aircallMissedCallsApi(apiId: string, apiToken: string): Plugin {
         } catch (error) {
           sendJson(response, 500, {
             message: error instanceof Error ? error.message : 'Unable to fetch Aircall missed calls.',
+          })
+        }
+      })
+    },
+  }
+}
+
+function aircallWebhookApi(
+  supabaseUrl: string,
+  supabaseServiceRoleKey: string,
+  webhookToken: string,
+): Plugin {
+  const acceptedEvents = new Set([
+    'call.ringing_on_agent',
+    'call.agent_declined',
+    'call.answered',
+    'call.hungup',
+    'call.ended',
+  ])
+
+  return {
+    name: 'aircall-webhook-api',
+    configureServer(server) {
+      server.middlewares.use('/api/aircall/webhook', async (request, response) => {
+        if (request.method === 'OPTIONS') {
+          sendJson(response, 200, { ok: true })
+          return
+        }
+
+        if (request.method !== 'POST') {
+          sendJson(response, 405, { message: 'Method not allowed.' })
+          return
+        }
+
+        try {
+          if (!supabaseUrl || !supabaseServiceRoleKey || !webhookToken) {
+            throw new Error('Aircall webhook storage is not configured.')
+          }
+
+          const payload = await readJsonRequest<AircallWebhookPayload>(request)
+          if (payload.token !== webhookToken) {
+            sendJson(response, 401, { message: 'Invalid Aircall webhook token.' })
+            return
+          }
+
+          if (!payload.event || !acceptedEvents.has(payload.event)) {
+            sendJson(response, 200, { ok: true, ignored: true })
+            return
+          }
+
+          const callId = Number(payload.data?.id)
+          const eventTimestamp = Number(payload.timestamp)
+          if (!Number.isFinite(callId) || !Number.isFinite(eventTimestamp)) {
+            sendJson(response, 200, { ok: true, ignored: true })
+            return
+          }
+
+          const agent = payload.data?.user
+          await supabaseRest(
+            supabaseUrl,
+            supabaseServiceRoleKey,
+            'aircall_call_events?on_conflict=event_key',
+            {
+              method: 'POST',
+              headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+              body: JSON.stringify({
+                event_key: `${callId}:${payload.event}:${eventTimestamp}:${agent?.id ?? 'none'}`,
+                call_id: callId,
+                event_type: payload.event,
+                event_timestamp: eventTimestamp,
+                agent_id: agent?.id ?? null,
+                agent_name: agent?.name ?? null,
+                payload,
+              }),
+            },
+          )
+          sendJson(response, 200, { ok: true })
+        } catch (error) {
+          sendJson(response, 500, {
+            message: error instanceof Error ? error.message : 'Unable to store Aircall event.',
           })
         }
       })
@@ -1014,6 +1119,76 @@ async function aircallGet<T>(url: string, apiId: string, apiToken: string): Prom
   return payload as T
 }
 
+function getSupabaseRestUrl(supabaseUrl: string, path: string) {
+  const baseUrl = supabaseUrl.endsWith('/') ? supabaseUrl : `${supabaseUrl}/`
+  const restUrl = baseUrl.includes('/rest/v1/') ? baseUrl : `${baseUrl}rest/v1/`
+  return new URL(path, restUrl).toString()
+}
+
+async function supabaseRest(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  path: string,
+  init: RequestInit = {},
+) {
+  const response = await fetch(getSupabaseRestUrl(supabaseUrl, path), {
+    ...init,
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      'Content-Type': 'application/json',
+      ...init.headers,
+    },
+  })
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { message?: string }
+    throw new Error(payload.message ?? `Supabase failed with ${response.status}.`)
+  }
+
+  return response
+}
+
+async function fetchLastRungAgents(
+  callIds: number[],
+  supabaseUrl: string,
+  serviceRoleKey: string,
+) {
+  const result = new Map<number, string>()
+  if (!callIds.length || !supabaseUrl || !serviceRoleKey) return result
+
+  const params = new URLSearchParams({
+    select: 'call_id,agent_name,event_timestamp',
+    event_type: 'eq.call.ringing_on_agent',
+    call_id: `in.(${callIds.join(',')})`,
+    order: 'event_timestamp.desc',
+  })
+  const response = await supabaseRest(
+    supabaseUrl,
+    serviceRoleKey,
+    `aircall_call_events?${params.toString()}`,
+  )
+  const rows = (await response.json()) as StoredAircallRingEvent[]
+  rows.forEach((row) => {
+    if (row.agent_name && !result.has(row.call_id)) result.set(row.call_id, row.agent_name)
+  })
+  return result
+}
+
+async function readJsonRequest<T>(request: IncomingMessage): Promise<T> {
+  const chunks: Buffer[] = []
+  let size = 0
+
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += buffer.length
+    if (size > 1_000_000) throw new Error('Request payload is too large.')
+    chunks.push(buffer)
+  }
+
+  return JSON.parse(Buffer.concat(chunks).toString('utf8')) as T
+}
+
 function isUserDidNotAnswerCall(call: AircallCall) {
   return (
     call.direction === 'inbound' &&
@@ -1328,7 +1503,17 @@ export default defineConfig(({ mode }) => {
       ),
       respondIoSampleApi(env.RESPOND_IO_ACCESS_TOKEN ?? ''),
       tiktokAdsManagerApi(),
-      aircallMissedCallsApi(env.AIRCALL_API_ID ?? '', env.AIRCALL_API_TOKEN ?? ''),
+      aircallWebhookApi(
+        env.VITE_SUPABASE_URL ?? '',
+        env.SUPABASE_SERVICE_ROLE_KEY ?? '',
+        env.AIRCALL_WEBHOOK_TOKEN ?? '',
+      ),
+      aircallMissedCallsApi(
+        env.AIRCALL_API_ID ?? '',
+        env.AIRCALL_API_TOKEN ?? '',
+        env.VITE_SUPABASE_URL ?? '',
+        env.SUPABASE_SERVICE_ROLE_KEY ?? '',
+      ),
       callConfirmationApi(
         env.HUBSPOT_ACCESS_TOKEN ?? '',
         env.AIRCALL_API_ID ?? '',

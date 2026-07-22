@@ -39,6 +39,20 @@ create table if not exists public.meta_budget_reports (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.aircall_call_events (
+  event_key text primary key,
+  call_id bigint not null,
+  event_type text not null,
+  event_timestamp bigint not null,
+  agent_id bigint,
+  agent_name text,
+  payload jsonb not null,
+  received_at timestamptz not null default now()
+);
+
+create index if not exists aircall_call_events_call_timeline_idx
+on public.aircall_call_events (call_id, event_timestamp desc);
+
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -63,6 +77,10 @@ execute function public.set_updated_at();
 
 alter table public.respond_io_conversations enable row level security;
 alter table public.meta_budget_reports enable row level security;
+alter table public.aircall_call_events enable row level security;
+
+-- No anon policies are intentionally created for aircall_call_events. Only the
+-- server-side service role may read or write raw webhook payloads.
 
 drop policy if exists "Allow anon read respond io conversations" on public.respond_io_conversations;
 create policy "Allow anon read respond io conversations"
