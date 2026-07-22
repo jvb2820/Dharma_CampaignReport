@@ -16,6 +16,9 @@ const TARGET_CAMPAIGN_PATTERNS = [
 ]
 const CALL_CONFIRMATION_AGENTS = ['William Carcamo', 'Kathering Silva']
 const BUSINESS_HOURS_END = 19
+// The Public Calls API marks these as missed, but dashboard review confirmed that
+// an agent attempted to answer after the caller had already disconnected.
+const EXCLUDED_MISSED_CALL_IDS = new Set([3979734082])
 
 type GraphCampaign = {
   id: string
@@ -441,6 +444,7 @@ function aircallMissedCallsApi(apiId: string, apiToken: string): Plugin {
 
           const missedCallRows = calls
             .filter((call) => isUserDidNotAnswerCall(call))
+            .filter((call) => !EXCLUDED_MISSED_CALL_IDS.has(call.id))
             .filter((call) =>
               clientNumber ? call.raw_digits.replace(/\D/g, '') === clientNumber : true,
             )
@@ -474,7 +478,6 @@ function aircallMissedCallsApi(apiId: string, apiToken: string): Plugin {
               aircallNumberDigits: enrichedCall.number?.digits ?? '',
               missedByName:
                 getVerifiedMissedByName(enrichedCall.id) ??
-                inferMissedByFromRouteTiming(enrichedCall) ??
                 assignee?.name ??
                 null,
               assigneeName: assignee?.name ?? null,
@@ -989,66 +992,11 @@ function getVerifiedMissedByName(callId: number) {
     3957724828: 'William Carcamo',
     3958681499: 'Kevin Tinjaca',
     3976084348: 'Kevin Tinjaca',
+    3979647200: 'Kevin Tinjaca',
+    3979664579: 'Kevin Tinjaca',
   }
 
   return verifiedMissedBy[callId] ?? null
-}
-
-function inferMissedByFromRouteTiming(call: AircallCall) {
-  const lineDigits = call.number?.digits?.replace(/\D/g, '') ?? ''
-  const selectedIvr = call.ivr_options_selected?.at(-1)
-  const selectedBranch = getSelectedIvrLabel(selectedIvr)
-
-  if (lineDigits !== '15612211635' || selectedBranch !== 'spanish') {
-    return null
-  }
-
-  const ivrEndedAt = selectedIvr?.transition_ended_at
-
-  if (!ivrEndedAt) {
-    return null
-  }
-
-  const ivrEndOffset = Math.max(
-    0,
-    Math.round(Date.parse(ivrEndedAt) / 1000 - call.started_at),
-  )
-  const secondsAfterIvr = call.duration - ivrEndOffset
-
-  if (secondsAfterIvr <= 22) {
-    return 'William Carcamo'
-  }
-
-  // Aircall's IVR transition timestamp precedes the dashboard's first agent-routing
-  // event by roughly nine seconds. Kevin's >1 second ring therefore ends no later
-  // than 47 seconds after the API transition, not 38 seconds.
-  if (secondsAfterIvr <= 47) {
-    return 'Kevin Tinjaca'
-  }
-
-  return null
-}
-
-function normalizeRouteValue(value?: string) {
-  return value?.trim().toLowerCase().replace(/\s+/g, ' ') ?? ''
-}
-
-function getSelectedIvrLabel(selectedIvr?: AircallIvrOption) {
-  const title = normalizeRouteValue(selectedIvr?.title)
-
-  // Aircall can return a stale/mismatched internal branch name. The title is the
-  // customer-facing IVR option that was actually selected (for example, Spanish).
-  if (title) {
-    return title
-  }
-
-  const branch = normalizeRouteValue(selectedIvr?.branch)
-
-  if (branch && !branch.startsWith('t(')) {
-    return branch
-  }
-
-  return ''
 }
 
 async function aircallGet<T>(url: string, apiId: string, apiToken: string): Promise<T> {
