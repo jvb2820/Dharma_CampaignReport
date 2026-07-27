@@ -1702,7 +1702,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     server: {
-      allowedHosts: ['dharma-campaignreport-1.onrender.com'],
+      allowedHosts: ['dharma-campaignreport-503z.onrender.com'],
     },
     plugins: [
       react(),
