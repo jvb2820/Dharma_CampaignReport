@@ -791,6 +791,7 @@ function agentReportApi(
   apiToken: string,
   respondIoToken: string,
   respondIoAnalyticsToken: string,
+  hubSpotToken: string,
 ): Plugin {
   return {
     name: 'aircall-agent-report-api',
@@ -810,9 +811,10 @@ function agentReportApi(
           }
 
           const { from, to } = getNewYorkUnixDayRange(reportDate)
-          const [calls, users] = await Promise.all([
+          const [calls, users, hubSpotBookings] = await Promise.all([
             fetchAircallCalls({ apiId, apiToken, from, to, phoneNumber: '', direction: null }),
             fetchAircallUsers(apiId, apiToken),
+            fetchHubSpotStaffBookings(reportDate, hubSpotToken).catch(() => null),
           ])
           const agents = AGENT_REPORT_AGENTS.map(({ name, aliases }) => {
             const matchingUsers = users.filter(
@@ -874,6 +876,9 @@ function agentReportApi(
                 call.answered_at !== null &&
                 call.ended_at - call.answered_at > 30,
             ).length
+            const bookingsByMessages =
+              hubSpotBookings?.get(`${name.toLowerCase()}|message`) ?? null
+            const bookingsByCall = hubSpotBookings?.get(`${name.toLowerCase()}|call`) ?? null
 
             return {
               name,
@@ -885,9 +890,12 @@ function agentReportApi(
                 : null,
               calls: hasCalls ? (agent?.outbound ?? 0) : null,
               connectedOver30Seconds: hasCalls ? connectedOver30Seconds : null,
-              bookingsByMessages: null,
-              bookingsByCall: null,
-              totalBookings: null,
+              bookingsByMessages,
+              bookingsByCall,
+              totalBookings:
+                bookingsByMessages === null || bookingsByCall === null
+                  ? null
+                  : bookingsByMessages + bookingsByCall,
             }
           })
 
@@ -909,9 +917,18 @@ function agentReportApi(
                 (sum, row) => sum + (row.connectedOver30Seconds ?? 0),
                 0,
               ),
-              bookingsByMessages: null,
-              bookingsByCall: null,
-              totalBookings: null,
+              bookingsByMessages:
+                hubSpotBookings === null
+                  ? null
+                  : staff.reduce((sum, row) => sum + (row.bookingsByMessages ?? 0), 0),
+              bookingsByCall:
+                hubSpotBookings === null
+                  ? null
+                  : staff.reduce((sum, row) => sum + (row.bookingsByCall ?? 0), 0),
+              totalBookings:
+                hubSpotBookings === null
+                  ? null
+                  : staff.reduce((sum, row) => sum + (row.totalBookings ?? 0), 0),
             },
             respondIoAvailable: respondMessages !== null,
           })
@@ -930,10 +947,21 @@ async function fetchRespondStaffMessages(
   apiToken: string,
   analyticsToken: string,
 ) {
-  if (!apiToken || !analyticsToken) throw new Error('respond.io reporting is not configured.')
-  const [userPayload, performance] = await Promise.all([
-    respondIoGet<{ items?: RespondIoUser[] }>('space/user', apiToken, { limit: '100' }),
-    respondIoAnalyticsPost<RespondIoUserPerformanceResponse>(
+  if (!apiToken) throw new Error('respond.io reporting is not configured.')
+  const userPayload = await respondIoGet<{ items?: RespondIoUser[] }>('space/user', apiToken, {
+    limit: '100',
+  })
+  const usersById = new Map(
+    (userPayload.items ?? []).map((user) => [
+      user.id,
+      `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
+    ]),
+  )
+  if (!analyticsToken) {
+    return runRespondIoSessionMessageReport(reportDate, usersById)
+  }
+  try {
+    const performance = await respondIoAnalyticsPost<RespondIoUserPerformanceResponse>(
       'user/performance',
       {
         date: getNewYorkDateRange(reportDate),
@@ -945,20 +973,40 @@ async function fetchRespondStaffMessages(
         },
       },
       analyticsToken,
-    ),
-  ])
-  const usersById = new Map(
-    (userPayload.items ?? []).map((user) => [
-      user.id,
-      `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
-    ]),
-  )
-  const messages = new Map<string, number>()
-  for (const row of performance.data?.data ?? []) {
-    const name = usersById.get(row.userId)
-    if (name) messages.set(name.toLowerCase(), row.outgoingMessageCount ?? 0)
+    )
+    const messages = new Map<string, number>()
+    for (const row of performance.data?.data ?? []) {
+      const name = usersById.get(row.userId)
+      if (name) messages.set(name.toLowerCase(), row.outgoingMessageCount ?? 0)
+    }
+    return messages
+  } catch {
+    return runRespondIoSessionMessageReport(reportDate, usersById)
   }
-  return messages
+}
+
+async function runRespondIoSessionMessageReport(
+  reportDate: string,
+  usersById: Map<number, string>,
+) {
+  const reportNames = new Set(
+    STAFF_PERFORMANCE_REPORT.flatMap(({ respondAliases }) =>
+      respondAliases.map((alias) => alias.toLowerCase()),
+    ),
+  )
+  const reportUsers = [...usersById].filter(([, name]) => reportNames.has(name.toLowerCase()))
+  const { stdout } = await execNodeScript(
+    [
+      'respond-message-report.mjs',
+      `--date=${reportDate}`,
+      `--user-ids=${JSON.stringify(reportUsers.map(([id]) => id))}`,
+    ],
+    { cwd: getAppRoot(), timeout: 120_000, maxBuffer: 1024 * 1024 },
+  )
+  const payload = JSON.parse(String(stdout)) as { counts?: Record<string, number> }
+  return new Map(
+    reportUsers.map(([id, name]) => [name.toLowerCase(), payload.counts?.[String(id)] ?? 0]),
+  )
 }
 
 function getNodeScriptEnv() {
@@ -1174,6 +1222,67 @@ async function fetchHubSpotMissedCallTasks(reportDate: string, token: string) {
   return tasks.filter(
     (task) => task.properties.hs_task_subject?.trim().toLowerCase() === 'missed calls',
   )
+}
+
+async function fetchHubSpotStaffBookings(reportDate: string, token: string) {
+  if (!token) throw new Error('HubSpot reporting is not configured.')
+  const { from, to } = getNewYorkUnixDayRange(reportDate)
+  const bookings = new Map<string, number>()
+  let after: string | undefined
+
+  do {
+    const response = await hubSpotPost<{
+      results?: Array<{
+        properties: {
+          agent_lead_management?: string | null
+          chanel?: string | null
+        }
+      }>
+      paging?: { next?: { after?: string } }
+    }>(
+      '/crm/v3/objects/contacts/search',
+      {
+        filterGroups: [
+          {
+            filters: [
+              {
+                propertyName: 'engagements_last_meeting_booked',
+                operator: 'GTE',
+                value: String(from * 1000),
+              },
+              {
+                propertyName: 'engagements_last_meeting_booked',
+                operator: 'LTE',
+                value: String(to * 1000),
+              },
+            ],
+          },
+        ],
+        properties: ['agent_lead_management', 'chanel'],
+        limit: 200,
+        ...(after ? { after } : {}),
+      },
+      token,
+    )
+
+    for (const contact of response.results ?? []) {
+      const staffName = contact.properties.agent_lead_management?.trim().toLowerCase()
+      const channel = contact.properties.chanel?.trim().toLowerCase()
+      if (!staffName || (channel !== 'call' && channel !== 'message')) continue
+      const key = `${staffName}|${channel}`
+      bookings.set(key, (bookings.get(key) ?? 0) + 1)
+    }
+    after = response.paging?.next?.after
+  } while (after)
+
+  for (const { name } of STAFF_PERFORMANCE_REPORT) {
+    bookings.set(`${name.toLowerCase()}|call`, bookings.get(`${name.toLowerCase()}|call`) ?? 0)
+    bookings.set(
+      `${name.toLowerCase()}|message`,
+      bookings.get(`${name.toLowerCase()}|message`) ?? 0,
+    )
+  }
+  return bookings
 }
 
 async function fetchHubSpotOwners(token: string) {
@@ -1729,6 +1838,7 @@ export default defineConfig(({ mode }) => {
         env.AIRCALL_API_TOKEN ?? '',
         env.RESPOND_IO_ACCESS_TOKEN ?? '',
         env.RESPOND_IO_ANALYTICS_ACCESS_TOKEN ?? '',
+        env.HUBSPOT_ACCESS_TOKEN ?? '',
       ),
       callConfirmationApi(
         env.HUBSPOT_ACCESS_TOKEN ?? '',

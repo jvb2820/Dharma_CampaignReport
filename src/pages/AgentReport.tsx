@@ -193,7 +193,7 @@ function AgentReport() {
                   </tbody>
                 </table>
               </div>
-              <p className="agent-report-note">Messages are outgoing respond.io messages. Booking columns require a HubSpot booking definition before they can be calculated.</p>
+              <p className="agent-report-note">Messages are outgoing respond.io messages. Bookings use HubSpot’s meeting-booked date, channel, and Agent Lead Management fields.</p>
             </section>
           </>
         ) : null}
