@@ -20,7 +20,6 @@ const RESPOND_IO_ORGANIZATION_ID = '236383'
 const RESPOND_IO_SPACE_ID = '238284'
 const AGENT_REPORT_AGENTS = [
   { name: 'Ailene Nuevas', aliases: ['Ailene Nuevas'] },
-  { name: 'Diana Villalobos', aliases: ['Diana Villalobos'] },
   { name: 'Laura Sanchez', aliases: ['Laura Sanchez', 'Laura Alejandra Sanchez Pinto'] },
   { name: 'Natasha Lopez', aliases: ['Natasha Lopez'] },
   { name: 'William Carcamo', aliases: ['William Carcamo'] },
@@ -30,7 +29,6 @@ const AGENT_REPORT_AGENTS = [
 const STAFF_PERFORMANCE_REPORT = [
   { name: 'Carol Fernandes', respondAliases: ['Carol Fernandes'], hasCalls: false },
   { name: 'Ailene Nuevas', respondAliases: ['Ailene Nuevas'], hasCalls: true },
-  { name: 'Diana Villalobos', respondAliases: ['Diana Villalobos'], hasCalls: true },
   { name: 'Laura Sanchez', respondAliases: ['Laura Sanchez'], hasCalls: true },
   { name: 'Natasha Lopez', respondAliases: ['Natasha Lopez'], hasCalls: true },
   { name: 'Natasha Lorente', respondAliases: ['Natasha Lorente'], hasCalls: false },
@@ -801,6 +799,29 @@ function agentReportApi(
       server.middlewares.use('/api/agent-report', async (request, response) => {
         try {
           const requestUrl = new URL(request.url ?? '', 'http://localhost')
+          if (requestUrl.searchParams.get('action') === 'respond-login') {
+            const host = request.headers.host?.split(':')[0] ?? ''
+            if (!['localhost', '127.0.0.1'].includes(host)) {
+              sendJson(response, 400, {
+                message:
+                  'respond.io login can only open from the local or desktop dashboard. Run the dashboard locally to refresh its Playwright session.',
+              })
+              return
+            }
+            const loginProcess = spawnNodeScript(['respond-login.mjs', '--auto'], {
+              cwd: getAppRoot(),
+              detached: true,
+              stdio: 'ignore',
+              windowsHide: false,
+            })
+            loginProcess.unref()
+            sendJson(response, 202, {
+              message:
+                'respond.io login opened. Sign in and leave the browser on Reports > Conversations; it will close after saving the session.',
+            })
+            return
+          }
+
           const reportDate = requestUrl.searchParams.get('date') || getTodayInNewYork()
           const mode = requestUrl.searchParams.get('mode') === 'live' ? 'live' : 'saved'
           if (!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) {
@@ -871,11 +892,16 @@ function agentReportApi(
               totalCalls: inbound + outbound,
             }
           })
+          let respondIoError: string | null = null
           const respondMessages = await fetchRespondStaffMessages(
             reportDate,
             respondIoToken,
             respondIoAnalyticsToken,
-          ).catch(() => null)
+          ).catch((error: unknown) => {
+            respondIoError =
+              error instanceof Error ? error.message : 'Unknown respond.io reporting error.'
+            return null
+          })
           const staff = STAFF_PERFORMANCE_REPORT.map(({ name, respondAliases, hasCalls }) => {
             const agent = agents.find((candidate) => namesMatch(candidate.name, name))
             const matchingAircallConfig = AGENT_REPORT_AGENTS.find((candidate) =>
@@ -956,6 +982,7 @@ function agentReportApi(
                   : staff.reduce((sum, row) => sum + (row.totalBookings ?? 0), 0),
             },
             respondIoAvailable: respondMessages !== null,
+            respondIoError,
           }
           await supabaseRest(
             supabaseUrl,

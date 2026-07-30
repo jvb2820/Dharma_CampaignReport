@@ -1613,6 +1613,10 @@ tbody tr:last-child td {
   background: #c66a20;
 }
 
+.agent-report-controls .agent-report-login-button {
+  background: #376b91;
+}
+
 .agent-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

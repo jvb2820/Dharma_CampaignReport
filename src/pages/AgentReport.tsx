@@ -35,6 +35,7 @@ type AgentReportResponse = {
     totalBookings: number | null
   }
   respondIoAvailable: boolean
+  respondIoError?: string | null
   message?: string
 }
 
@@ -61,11 +62,45 @@ function formatDuration(totalSeconds: number) {
   return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
+function withoutRemovedAgents(report: AgentReportResponse): AgentReportResponse {
+  const agents = report.agents.filter((agent) => agent.name !== 'Diana Villalobos')
+  const staff = report.staff.filter((row) => row.name !== 'Diana Villalobos')
+  const sumNullable = (values: Array<number | null>) =>
+    values.some((value) => value === null)
+      ? null
+      : values.reduce<number>((sum, value) => sum + (value ?? 0), 0)
+
+  return {
+    ...report,
+    agents,
+    totals: {
+      callLengthSeconds: agents.reduce((sum, agent) => sum + agent.callLengthSeconds, 0),
+      inbound: agents.reduce((sum, agent) => sum + agent.inbound, 0),
+      outbound: agents.reduce((sum, agent) => sum + agent.outbound, 0),
+      totalCalls: agents.reduce((sum, agent) => sum + agent.totalCalls, 0),
+    },
+    staff,
+    staffTotals: {
+      messages: staff.reduce((sum, row) => sum + (row.messages ?? 0), 0),
+      calls: staff.reduce((sum, row) => sum + (row.calls ?? 0), 0),
+      connectedOver30Seconds: staff.reduce(
+        (sum, row) => sum + (row.connectedOver30Seconds ?? 0),
+        0,
+      ),
+      bookingsByMessages: sumNullable(staff.map((row) => row.bookingsByMessages)),
+      bookingsByCall: sumNullable(staff.map((row) => row.bookingsByCall)),
+      totalBookings: sumNullable(staff.map((row) => row.totalBookings)),
+    },
+  }
+}
+
 function AgentReport() {
   const [draftDate, setDraftDate] = useState(getNewYorkDate)
   const [report, setReport] = useState<AgentReportResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [loadingMode, setLoadingMode] = useState<'saved' | 'live' | null>(null)
+  const [isRespondLoginStarting, setIsRespondLoginStarting] = useState(false)
+  const [respondLoginMessage, setRespondLoginMessage] = useState('')
   const [error, setError] = useState('')
 
   async function loadReport(mode: 'saved' | 'live') {
@@ -78,12 +113,33 @@ function AgentReport() {
       const response = await fetch(getApiUrl(`/api/agent-report?${params}`))
       const payload = (await response.json()) as AgentReportResponse
       if (!response.ok) throw new Error(payload.message ?? 'Unable to load agent report.')
-      setReport(payload)
+      setReport(withoutRemovedAgents(payload))
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load agent report.')
     } finally {
       setIsLoading(false)
       setLoadingMode(null)
+    }
+  }
+
+  async function startRespondLogin() {
+    setIsRespondLoginStarting(true)
+    setRespondLoginMessage('')
+    setError('')
+    try {
+      const response = await fetch(getApiUrl('/api/agent-report?action=respond-login'))
+      const payload = (await response.json()) as { message?: string }
+      if (!response.ok) throw new Error(payload.message ?? 'Unable to start respond.io login.')
+      setRespondLoginMessage(
+        payload.message ??
+          'Login window opened. Sign in and leave it on Reports > Conversations.',
+      )
+    } catch (loginError) {
+      setError(
+        loginError instanceof Error ? loginError.message : 'Unable to start respond.io login.',
+      )
+    } finally {
+      setIsRespondLoginStarting(false)
     }
   }
 
@@ -136,10 +192,21 @@ function AgentReport() {
             >
               {loadingMode === 'live' ? 'Fetching…' : 'Fetch Live'}
             </button>
+            <button
+              type="button"
+              className="agent-report-login-button"
+              onClick={startRespondLogin}
+              disabled={isLoading || isRespondLoginStarting}
+            >
+              {isRespondLoginStarting ? 'Opening…' : 'Login to respond.io'}
+            </button>
           </div>
         </div>
 
         {error ? <div className="call-confirmation-message error">{error}</div> : null}
+        {respondLoginMessage ? (
+          <div className="call-confirmation-message">{respondLoginMessage}</div>
+        ) : null}
         {isLoading ? <div className="call-confirmation-message loading">Loading agent activity…</div> : null}
 
         {!isLoading && report ? (
@@ -163,7 +230,12 @@ function AgentReport() {
                   <h2 id="staff-performance-title">Staff Performance</h2>
                   <p>Outgoing messages and outbound calling activity for the selected date.</p>
                 </div>
-                {!report.respondIoAvailable ? <span>respond.io message data unavailable</span> : null}
+                {!report.respondIoAvailable ? (
+                  <span title={report.respondIoError ?? undefined}>
+                    respond.io message data unavailable
+                    {report.respondIoError ? `: ${report.respondIoError}` : ''}
+                  </span>
+                ) : null}
               </div>
               <div className="agent-report-table-wrap">
                 <table className="agent-report-table staff-performance-table">
