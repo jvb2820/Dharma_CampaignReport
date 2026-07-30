@@ -50,6 +50,17 @@ create table if not exists public.aircall_call_events (
   received_at timestamptz not null default now()
 );
 
+create table if not exists public.agent_reports (
+  report_date date primary key,
+  timezone text not null default 'America/New_York',
+  report_data jsonb not null,
+  fetched_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint agent_reports_data_is_object
+    check (jsonb_typeof(report_data) = 'object')
+);
+
 create index if not exists aircall_call_events_call_timeline_idx
 on public.aircall_call_events (call_id, event_timestamp desc);
 
@@ -75,12 +86,21 @@ before update on public.meta_budget_reports
 for each row
 execute function public.set_updated_at();
 
+drop trigger if exists set_agent_reports_updated_at on public.agent_reports;
+create trigger set_agent_reports_updated_at
+before update on public.agent_reports
+for each row
+execute function public.set_updated_at();
+
 alter table public.respond_io_conversations enable row level security;
 alter table public.meta_budget_reports enable row level security;
 alter table public.aircall_call_events enable row level security;
+alter table public.agent_reports enable row level security;
 
 -- No anon policies are intentionally created for aircall_call_events. Only the
 -- server-side service role may read or write raw webhook payloads.
+-- Agent reports are also server-only: the public dashboard reads them through
+-- /api/agent-report so the service-role key never reaches the browser.
 
 drop policy if exists "Allow anon read respond io conversations" on public.respond_io_conversations;
 create policy "Allow anon read respond io conversations"

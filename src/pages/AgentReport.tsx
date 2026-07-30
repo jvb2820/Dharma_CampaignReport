@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 type AgentReportResponse = {
   reportDate: string
@@ -63,34 +63,29 @@ function formatDuration(totalSeconds: number) {
 
 function AgentReport() {
   const [draftDate, setDraftDate] = useState(getNewYorkDate)
-  const [reportDate, setReportDate] = useState(getNewYorkDate)
   const [report, setReport] = useState<AgentReportResponse | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(false)
+  const [loadingMode, setLoadingMode] = useState<'saved' | 'live' | null>(null)
   const [error, setError] = useState('')
 
-  useEffect(() => {
-    const controller = new AbortController()
-    async function loadReport() {
-      setIsLoading(true)
-      setError('')
-      try {
-        const params = new URLSearchParams({ date: reportDate })
-        const response = await fetch(getApiUrl(`/api/agent-report?${params}`), {
-          signal: controller.signal,
-        })
-        const payload = (await response.json()) as AgentReportResponse
-        if (!response.ok) throw new Error(payload.message ?? 'Unable to load agent report.')
-        setReport(payload)
-      } catch (loadError) {
-        if (loadError instanceof DOMException && loadError.name === 'AbortError') return
-        setError(loadError instanceof Error ? loadError.message : 'Unable to load agent report.')
-      } finally {
-        if (!controller.signal.aborted) setIsLoading(false)
-      }
+  async function loadReport(mode: 'saved' | 'live') {
+    if (!draftDate) return
+    setIsLoading(true)
+    setLoadingMode(mode)
+    setError('')
+    try {
+      const params = new URLSearchParams({ date: draftDate, mode })
+      const response = await fetch(getApiUrl(`/api/agent-report?${params}`))
+      const payload = (await response.json()) as AgentReportResponse
+      if (!response.ok) throw new Error(payload.message ?? 'Unable to load agent report.')
+      setReport(payload)
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Unable to load agent report.')
+    } finally {
+      setIsLoading(false)
+      setLoadingMode(null)
     }
-    loadReport()
-    return () => controller.abort()
-  }, [reportDate])
+  }
 
   const primaryAgents = report?.agents.slice(0, 5) ?? []
   const secondaryAgents = report?.agents.slice(5) ?? []
@@ -130,8 +125,16 @@ function AgentReport() {
               <span>Report date</span>
               <input type="date" value={draftDate} onChange={(event) => setDraftDate(event.target.value)} />
             </label>
-            <button type="button" onClick={() => setReportDate(draftDate)} disabled={isLoading || !draftDate}>
-              {isLoading ? 'Loading…' : 'Apply'}
+            <button type="button" onClick={() => loadReport('saved')} disabled={isLoading || !draftDate}>
+              {loadingMode === 'saved' ? 'Loading…' : 'Apply'}
+            </button>
+            <button
+              type="button"
+              className="agent-report-live-button"
+              onClick={() => loadReport('live')}
+              disabled={isLoading || !draftDate}
+            >
+              {loadingMode === 'live' ? 'Fetching…' : 'Fetch Live'}
             </button>
           </div>
         </div>

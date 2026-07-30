@@ -1609,6 +1609,10 @@ tbody tr:last-child td {
   opacity: 0.65;
 }
 
+.agent-report-controls .agent-report-live-button {
+  background: #c66a20;
+}
+
 .agent-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

@@ -792,21 +792,46 @@ function agentReportApi(
   respondIoToken: string,
   respondIoAnalyticsToken: string,
   hubSpotToken: string,
+  supabaseUrl: string,
+  supabaseServiceRoleKey: string,
 ): Plugin {
   return {
     name: 'aircall-agent-report-api',
     configureServer(server) {
       server.middlewares.use('/api/agent-report', async (request, response) => {
         try {
-          if (!apiId || !apiToken) {
-            sendJson(response, 500, { message: 'Missing Aircall credentials.' })
+          const requestUrl = new URL(request.url ?? '', 'http://localhost')
+          const reportDate = requestUrl.searchParams.get('date') || getTodayInNewYork()
+          const mode = requestUrl.searchParams.get('mode') === 'live' ? 'live' : 'saved'
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) {
+            sendJson(response, 400, { message: 'Date must use YYYY-MM-DD.' })
             return
           }
 
-          const requestUrl = new URL(request.url ?? '', 'http://localhost')
-          const reportDate = requestUrl.searchParams.get('date') || getTodayInNewYork()
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) {
-            sendJson(response, 400, { message: 'Date must use YYYY-MM-DD.' })
+          if (!supabaseUrl || !supabaseServiceRoleKey) {
+            sendJson(response, 500, { message: 'Agent report storage is not configured.' })
+            return
+          }
+
+          if (mode === 'saved') {
+            const savedResponse = await supabaseRest(
+              supabaseUrl,
+              supabaseServiceRoleKey,
+              `agent_reports?report_date=eq.${encodeURIComponent(reportDate)}&select=report_data`,
+            )
+            const savedRows = (await savedResponse.json()) as Array<{ report_data: unknown }>
+            if (!savedRows.length) {
+              sendJson(response, 404, {
+                message: 'No saved report exists for this date. Use Fetch Live to create it.',
+              })
+              return
+            }
+            sendJson(response, 200, savedRows[0].report_data)
+            return
+          }
+
+          if (!apiId || !apiToken) {
+            sendJson(response, 500, { message: 'Missing Aircall credentials.' })
             return
           }
 
@@ -899,7 +924,7 @@ function agentReportApi(
             }
           })
 
-          sendJson(response, 200, {
+          const reportData = {
             reportDate,
             timezone: 'America/New_York',
             agents,
@@ -931,7 +956,23 @@ function agentReportApi(
                   : staff.reduce((sum, row) => sum + (row.totalBookings ?? 0), 0),
             },
             respondIoAvailable: respondMessages !== null,
-          })
+          }
+          await supabaseRest(
+            supabaseUrl,
+            supabaseServiceRoleKey,
+            'agent_reports?on_conflict=report_date',
+            {
+              method: 'POST',
+              headers: { Prefer: 'resolution=merge-duplicates' },
+              body: JSON.stringify({
+                report_date: reportDate,
+                timezone: reportData.timezone,
+                report_data: reportData,
+                fetched_at: new Date().toISOString(),
+              }),
+            },
+          )
+          sendJson(response, 200, reportData)
         } catch (error) {
           sendJson(response, 500, {
             message: error instanceof Error ? error.message : 'Unable to build agent report.',
@@ -1839,6 +1880,8 @@ export default defineConfig(({ mode }) => {
         env.RESPOND_IO_ACCESS_TOKEN ?? '',
         env.RESPOND_IO_ANALYTICS_ACCESS_TOKEN ?? '',
         env.HUBSPOT_ACCESS_TOKEN ?? '',
+        env.VITE_SUPABASE_URL ?? '',
+        env.SUPABASE_SERVICE_ROLE_KEY ?? '',
       ),
       callConfirmationApi(
         env.HUBSPOT_ACCESS_TOKEN ?? '',
