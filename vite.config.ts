@@ -27,11 +27,11 @@ const AGENT_REPORT_AGENTS = [
   { name: 'Kevin Tinjaca', aliases: ['Kevin Tinjaca'] },
 ]
 const STAFF_PERFORMANCE_REPORT = [
-  { name: 'Carol Fernandes', respondAliases: ['Carol Fernandes'], hasCalls: false },
+  { name: 'Carol Fernandes', respondAliases: ['Carolina Lopez'], hasCalls: false },
   { name: 'Ailene Nuevas', respondAliases: ['Ailene Nuevas'], hasCalls: true },
   { name: 'Laura Sanchez', respondAliases: ['Laura Sanchez'], hasCalls: true },
   { name: 'Natasha Lopez', respondAliases: ['Natasha Lopez'], hasCalls: true },
-  { name: 'Natasha Lorente', respondAliases: ['Natasha Lorente'], hasCalls: false },
+  { name: 'Natasha Lorente', respondAliases: ['Jose Lorente'], hasCalls: false },
   { name: 'William Carcamo', respondAliases: ['William Carcamo'], hasCalls: true },
 ]
 // The Public Calls API marks these as missed, but dashboard review confirmed that

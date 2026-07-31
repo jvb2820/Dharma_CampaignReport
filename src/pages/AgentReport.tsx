@@ -143,8 +143,9 @@ function AgentReport() {
     }
   }
 
-  const primaryAgents = report?.agents.slice(0, 5) ?? []
-  const secondaryAgents = report?.agents.slice(5) ?? []
+  const secondaryAgentNames = new Set(['Kathering Silva', 'Kevin Tinjaca'])
+  const primaryAgents = report?.agents.filter((agent) => !secondaryAgentNames.has(agent.name)) ?? []
+  const secondaryAgents = report?.agents.filter((agent) => secondaryAgentNames.has(agent.name)) ?? []
 
   const renderAgentTable = (agents: AgentReportResponse['agents'], label: string) => (
     <div className="agent-report-table-card" aria-label={label}>
